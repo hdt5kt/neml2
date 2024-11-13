@@ -71,6 +71,7 @@ jobs:
     permissions:
       contents: read
       checks: write
+      pull-requests: write
     strategy:
       matrix:
         os: [ubuntu-latest, macos-12]
@@ -107,13 +108,13 @@ jobs:
         continue-on-error: true
       - name: Publish Test Results
         if: matrix.os == 'ubuntu-latest'
-        uses: EnricoMi/publish-unit-test-result-action@v2
+        uses: EnricoMi/publish-unit-test-result-action/linux@v2
         with:
           files: tests/*.xml
           check_name: Test Results (${{ matrix.os }}-${{ matrix.btype }}-${{ matrix.unity }})
       - name: Publish Test Results
         if: matrix.os == 'macos-12'
-        uses: EnricoMi/publish-unit-test-result-action/composite@v2
+        uses: EnricoMi/publish-unit-test-result-action/macos@v2
         with:
           files: tests/*.xml
           check_name: Test Results (${{ matrix.os }}-${{ matrix.btype }}-${{ matrix.unity }})

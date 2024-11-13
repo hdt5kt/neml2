@@ -31,6 +31,7 @@ jobs:
     permissions:
       contents: read
       checks: write
+      pull-requests: write
     strategy:
       fail-fast: false
       matrix:
@@ -54,13 +55,13 @@ jobs:
       - run: pytest --junitxml=pytest.xml python/tests
       - name: Publish Test Results
         if: matrix.os == 'ubuntu-latest'
-        uses: EnricoMi/publish-unit-test-result-action@v2
+        uses: EnricoMi/publish-unit-test-result-action/linux@v2
         with:
           files: pytest.xml
           check_name: Python Binding Test Results (${{ matrix.os }})
       - name: Publish Test Results
         if: matrix.os == 'macos-12'
-        uses: EnricoMi/publish-unit-test-result-action/composite@v2
+        uses: EnricoMi/publish-unit-test-result-action/macos@v2
         with:
           files: pytest.xml
           check_name: Python Binding Test Results (${{ matrix.os }})
