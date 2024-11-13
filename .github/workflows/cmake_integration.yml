@@ -1,4 +1,4 @@
-name: Test CMake integration
+name: CMake integration
 
 on:
   push:
