@@ -25,6 +25,7 @@ jobs:
       - name: Comment on the pull request
         uses: marocchino/sticky-pull-request-comment@v2
         with:
+          header: preview-link
           message: |
             Documentation preview removed.
             To view the documentation, please visit the [main documentation page](https://applied-material-modeling.github.io/neml2).
