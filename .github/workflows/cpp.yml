@@ -74,7 +74,7 @@ jobs:
       pull-requests: write
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-12]
+        os: [ubuntu-latest, macos-latest]
         btype: [Release, Debug]
         unity: [ON, OFF]
     runs-on: ${{ matrix.os }}
@@ -113,7 +113,7 @@ jobs:
           files: tests/*.xml
           check_name: Test Results (${{ matrix.os }}-${{ matrix.btype }}-${{ matrix.unity }})
       - name: Publish Test Results
-        if: matrix.os == 'macos-12'
+        if: matrix.os == 'macos-latest'
         uses: EnricoMi/publish-unit-test-result-action/macos@v2
         with:
           files: tests/*.xml
