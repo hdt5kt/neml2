@@ -35,7 +35,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-12]
+        os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -46,11 +46,11 @@ jobs:
           cmake-version: "3.28"
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.8"
+          python-version: "3.9"
       - name: Install Python dependencies
         run: pip install -r requirements.txt
       - name: Install PyTorch
-        run: pip install torch==2.2.2
+        run: pip install torch==2.5.1
       - run: pip install -v .
       - run: pytest --junitxml=pytest.xml python/tests
       - name: Publish Test Results
@@ -60,7 +60,7 @@ jobs:
           files: pytest.xml
           check_name: Python Binding Test Results (${{ matrix.os }})
       - name: Publish Test Results
-        if: matrix.os == 'macos-12'
+        if: matrix.os == 'macos-latest'
         uses: EnricoMi/publish-unit-test-result-action/macos@v2
         with:
           files: pytest.xml

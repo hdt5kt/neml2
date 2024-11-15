@@ -27,11 +27,11 @@ jobs:
           path: neml2
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.8"
+          python-version: "3.9"
       - uses: jwlawson/actions-setup-cmake@v2
         with:
           cmake-version: "3.28"
-      - run: pip install torch==2.2.2
+      - run: pip install torch==2.5.1
       - name: Create a source file for testing purposes
         run: |
           echo -e "\

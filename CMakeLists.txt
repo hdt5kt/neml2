@@ -39,7 +39,7 @@ set(NEML2_CLANG_TIDY_PATH "clang-tidy" CACHE STRING "Path to the clang-tidy exec
 # ----------------------------------------------------------------------------
 # Dependencies and 3rd party packages
 # ----------------------------------------------------------------------------
-set(PYTORCH_VERSION "2.2.2")
+set(PYTORCH_VERSION "2.5.1")
 set(DOXYGEN_VERSION "1.10.0")
 set(DOXYGEN_AWESOME_VERSION "2.3.2")
 set(PYBIND11_VERSION "2.12.0")
