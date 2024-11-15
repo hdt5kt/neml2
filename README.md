@@ -1,6 +1,6 @@
 # NEML2
 
-[![Documentation](https://github.com/applied-material-modeling/neml2/actions/workflows/build_docs.yml/badge.svg?branch=main)](https://applied-material-modeling.github.io/neml2/) [![tests](https://github.com/applied-material-modeling/neml2/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/applied-material-modeling/neml2/actions/workflows/tests.yml)
+[![Documentation](https://github.com/applied-material-modeling/neml2/actions/workflows/build_docs.yml/badge.svg?branch=main)](https://applied-material-modeling.github.io/neml2/) [![C++ backend testing](https://github.com/applied-material-modeling/neml2/actions/workflows/cpp.yml/badge.svg?branch=main)](https://github.com/applied-material-modeling/neml2/actions/workflows/cpp.yml) [![Python package testing](https://github.com/applied-material-modeling/neml2/actions/workflows/python.yml/badge.svg?branch=main)](https://github.com/applied-material-modeling/neml2/actions/workflows/python.yml)
 
 ## Overview
 
