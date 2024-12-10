@@ -645,6 +645,14 @@ Model::assemble(bool residual, bool Jacobian)
     value_and_dvalue();
   else if (!residual && Jacobian)
     dvalue();
+
+  // std::cout << "residual/h: \n"
+  //           << get_output_variable<Tensor>({"residual", "h"}).value() << std::endl;
+  // std::cout << "residual/delta: \n"
+  //           << get_output_variable<Tensor>({"residual", "delta"}).value() << std::endl;
+  // std::cout << "residual/alpha: " << get_output_variable<Tensor>({"residual", "alpha"}).value()
+  // << std::endl;
+  // exit(0);
 }
 
 void
