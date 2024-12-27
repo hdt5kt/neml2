@@ -1,0 +1,31 @@
+name: "NEML2 dependencies"
+description: "Checkout NEML2 repository, setup Python, CMake, and system dependencies"
+inputs:
+  os:
+    required: true
+runs:
+  using: "composite"
+  steps:
+    -  uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.9"
+    - uses: jwlawson/actions-setup-cmake@v2
+      with:
+        cmake-version: "3.28"
+    - name: Install system dependencies (Ubuntu)
+      if: ${{ startsWith(matrix.os, 'ubuntu') }}
+      run: sudo apt install graphviz lcov
+    - name: Install system dependencies (MacOS)
+      if: ${{ startsWith(matrix.os, 'macos') }}
+      run: brew install graphviz lcov
+    - name: Install Python dependencies
+      run: pip install -r requirements.txt
+    - name: Install PyTorch CPU-only (Ubuntu)
+      if: ${{ startsWith(matrix.os, 'ubuntu') }}
+      run: pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+    - name: Install PyTorch CPU-only (MacOS)
+      if: ${{ startsWith(matrix.os, 'macos') }}
+      run: pip install torch==2.5.1
