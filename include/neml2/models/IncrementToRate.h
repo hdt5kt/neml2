@@ -22,37 +22,40 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+#pragma once
+
+#include "neml2/models/Model.h"
+
 #include "neml2/tensors/R2.h"
-
-#include "neml2/misc/math.h"
-
-#include "neml2/tensors/Rot.h"
-#include "neml2/tensors/SR2.h"
-#include "neml2/tensors/WR2.h"
-#include "neml2/tensors/R4.h"
-#include "neml2/tensors/SSR4.h"
 
 namespace neml2
 {
-
-R2::R2(const SR2 & S)
-  : R2(math::mandel_to_full(S))
+template <typename T>
+class IncrementToRate : public Model
 {
-}
+public:
+  static OptionSet expected_options();
 
-R2::R2(const WR2 & W)
-  : R2(math::skew_to_full(W))
-{
-}
+  IncrementToRate(const OptionSet & options);
 
-R2::R2(const Rot & r)
-  : R2(r.euler_rodrigues())
-{
-}
+protected:
+  void set_value(bool out, bool dout_din, bool d2out_din2) override;
 
-R4
-R2::identity_map(const torch::TensorOptions & options)
-{
-  return torch::eye(9, options).view({3, 3, 3, 3});
-}
+  /// Current variable value
+  const Variable<T> & _dv;
+
+  /// Current time
+  const Variable<Scalar> & _t;
+
+  /// Old time
+  const Variable<Scalar> & _tn;
+
+  /// Variable rate
+  Variable<T> & _dv_dt;
+};
+
+typedef IncrementToRate<R2> R2IncrementToRate;
+typedef IncrementToRate<Scalar> ScalarIncrementToRate;
+typedef IncrementToRate<SR2> SR2IncrementToRate;
+typedef IncrementToRate<Vec> VecIncrementToRate;
 } // namespace neml2
