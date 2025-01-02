@@ -22,13 +22,28 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+#include <torch/csrc/jit/frontend/tracer.h>
+
 #include "neml2/models/Model.h"
 #include "neml2/models/Assembler.h"
 #include "neml2/base/guards.h"
 #include "neml2/misc/math.h"
+#include "neml2/jit/utils.h"
 
 namespace neml2
 {
+bool
+Model::TraceSchema::operator==(const TraceSchema & other) const
+{
+  return batch_dims == other.batch_dims;
+}
+
+bool
+Model::TraceSchema::operator<(const TraceSchema & other) const
+{
+  return batch_dims < other.batch_dims;
+}
+
 OptionSet
 Model::expected_options()
 {
@@ -37,6 +52,15 @@ Model::expected_options()
   NonlinearSystem::disable_automatic_scaling(options);
 
   options.section() = "Models";
+
+  options.set<bool>("jit") = true;
+  options.set("jit").doc() = "Use JIT compilation for the forward operator";
+
+  options.set<bool>("production") = false;
+  options.set("production").doc() =
+      "Production mode. This option is used to disable features like function graph tracking and "
+      "tensor version tracking which are useful for training (i.e., calibrating model parameters) "
+      "but are not necessary in production runs.";
 
   options.set<bool>("_nonlinear_system") = false;
   options.set("_nonlinear_system").suppressed() = true;
@@ -50,7 +74,9 @@ Model::Model(const OptionSet & options)
     VariableStore(options, this),
     NonlinearSystem(options),
     DiagnosticsInterface(this),
-    _nonlinear_system(options.get<bool>("_nonlinear_system"))
+    _nonlinear_system(options.get<bool>("_nonlinear_system")),
+    _jit(options.get<bool>("jit")),
+    _production(options.get<bool>("production"))
 {
 }
 
@@ -199,14 +225,132 @@ Model::zero_output()
     submodel->zero_output();
 }
 
+Model::TraceSchema
+Model::compute_trace_schema() const
+{
+  std::vector<Size> batch_dims;
+  for (auto && [name, var] : input_variables())
+    batch_dims.push_back(var.batch_dim());
+  for (auto && [name, param] : host<ParameterStore>()->named_parameters())
+    batch_dims.push_back(Tensor(param).batch_dim());
+
+  return TraceSchema{batch_dims};
+}
+
+std::size_t
+Model::forward_operator_index(bool out, bool dout, bool d2out) const
+{
+  return (out ? 4 : 0) + (dout ? 2 : 0) + (d2out ? 1 : 0);
+}
+
+void
+Model::forward(bool out, bool dout, bool d2out)
+{
+  torch::InferenceMode mode_guard(_production && !torch::jit::tracer::isTracing());
+
+  if (dout || d2out)
+    enable_AD();
+
+  set_value(out || AD_need_value(dout, d2out), dout, d2out);
+
+  if (dout || d2out)
+    extract_AD_derivatives(dout, d2out);
+
+  return;
+}
+
+void
+Model::forward_maybe_jit(bool out, bool dout, bool d2out)
+{
+  if (!is_jit_enabled() || torch::jit::tracer::isTracing())
+  {
+    forward(out, dout, d2out);
+    return;
+  }
+
+  auto & traced_functions =
+      currently_solving_nonlinear_system() ? _traced_functions_nl_sys : _traced_functions;
+
+  const auto forward_op_idx = forward_operator_index(out, dout, d2out);
+  const auto new_schema = compute_trace_schema();
+  auto traced_schema_and_function = traced_functions[forward_op_idx].find(new_schema);
+
+  if (traced_schema_and_function != traced_functions[forward_op_idx].end())
+  {
+    auto & [trace_schema, traced_function] = *traced_schema_and_function;
+    torch::InferenceMode mode_guard(_production);
+    auto stack = collect_input_stack();
+    traced_function->run(stack);
+    assign_output_stack(stack, out, dout, d2out);
+  }
+  else
+  {
+    auto forward_wrap = [&](torch::jit::Stack inputs) -> torch::jit::Stack
+    {
+      assign_input_stack(inputs);
+      forward(out, dout, d2out);
+      return collect_output_stack(out, dout, d2out);
+    };
+    auto trace = std::get<0>(torch::jit::tracer::trace(
+        collect_input_stack(),
+        forward_wrap,
+        [this](const torch::Tensor & var) { return variable_name_lookup(var); },
+        /*strict=*/false,
+        /*force_outplace=*/false));
+    auto new_function =
+        std::make_unique<torch::jit::GraphFunction>(name() + ".forward",
+                                                    trace->graph,
+                                                    /*function_creator=*/nullptr,
+                                                    torch::jit::ExecutorExecutionMode::PROFILING);
+    traced_functions[forward_op_idx].emplace(new_schema, std::move(new_function));
+
+    // Rerun this method -- this time using the jitted graph (without tracing)
+    forward_maybe_jit(out, dout, d2out);
+  }
+}
+
+std::string
+Model::variable_name_lookup(const torch::Tensor & var)
+{
+  // Look for the variable in the input and output variables
+  for (auto && [ivar, val] : input_variables())
+    if (val.tensor().data_ptr() == var.data_ptr())
+      return name() + "::" + utils::stringify(ivar);
+  for (auto && [ovar, val] : output_variables())
+    if (val.tensor().data_ptr() == var.data_ptr())
+      return name() + "::" + utils::stringify(ovar);
+
+  // Look for the variable in the parameter and buffer store
+  for (auto && [pname, pval] : host<ParameterStore>()->named_parameters())
+    if (Tensor(pval).data_ptr() == var.data_ptr())
+      return name() + "::" + utils::stringify(pname);
+  for (auto && [bname, bval] : host<BufferStore>()->named_buffers())
+    if (Tensor(bval).data_ptr() == var.data_ptr())
+      return name() + "::" + utils::stringify(bname);
+
+  // Look for the variable in the registered models
+  for (auto * submodel : registered_models())
+  {
+    const auto name = submodel->variable_name_lookup(var);
+    if (!name.empty())
+      return name;
+  }
+
+  return "";
+}
+
 ValueMap
 Model::value(const ValueMap & in)
 {
   zero_input();
   assign_input(in);
   zero_output();
-  value();
-  return collect_output();
+  forward_maybe_jit(true, false, false);
+
+  const auto values = collect_output();
+  clear_input();
+  clear_output();
+  return values;
 }
 
 std::tuple<ValueMap, DerivMap>
@@ -215,8 +359,13 @@ Model::value_and_dvalue(const ValueMap & in)
   zero_input();
   assign_input(in);
   zero_output();
-  value_and_dvalue();
-  return {collect_output(), collect_output_derivatives()};
+  forward_maybe_jit(true, true, false);
+
+  const auto values = collect_output();
+  const auto derivs = collect_output_derivatives();
+  clear_input();
+  clear_output();
+  return {values, derivs};
 }
 
 DerivMap
@@ -225,8 +374,12 @@ Model::dvalue(const ValueMap & in)
   zero_input();
   assign_input(in);
   zero_output();
-  dvalue();
-  return collect_output_derivatives();
+  forward_maybe_jit(false, true, false);
+
+  const auto derivs = collect_output_derivatives();
+  clear_input();
+  clear_output();
+  return derivs;
 }
 
 std::tuple<ValueMap, DerivMap, SecDerivMap>
@@ -235,8 +388,14 @@ Model::value_and_dvalue_and_d2value(const ValueMap & in)
   zero_input();
   assign_input(in);
   zero_output();
-  value_and_dvalue_and_d2value();
-  return {collect_output(), collect_output_derivatives(), collect_output_second_derivatives()};
+  forward_maybe_jit(true, true, true);
+
+  const auto values = collect_output();
+  const auto derivs = collect_output_derivatives();
+  const auto secderivs = collect_output_second_derivatives();
+  clear_input();
+  clear_output();
+  return {values, derivs, secderivs};
 }
 
 std::tuple<DerivMap, SecDerivMap>
@@ -245,8 +404,13 @@ Model::dvalue_and_d2value(const ValueMap & in)
   zero_input();
   assign_input(in);
   zero_output();
-  dvalue_and_d2value();
-  return {collect_output_derivatives(), collect_output_second_derivatives()};
+  forward_maybe_jit(false, true, true);
+
+  const auto derivs = collect_output_derivatives();
+  const auto secderivs = collect_output_second_derivatives();
+  clear_input();
+  clear_output();
+  return {derivs, secderivs};
 }
 
 SecDerivMap
@@ -255,54 +419,12 @@ Model::d2value(const ValueMap & in)
   zero_input();
   assign_input(in);
   zero_output();
-  d2value();
-  return collect_output_second_derivatives();
-}
+  forward_maybe_jit(false, false, true);
 
-void
-Model::value()
-{
-  set_value(true, false, false);
-}
-
-void
-Model::value_and_dvalue()
-{
-  enable_AD();
-  set_value(true, true, false);
-  extract_AD_derivatives(true, false);
-}
-
-void
-Model::dvalue()
-{
-  enable_AD();
-  set_value(AD_need_value(true, false), true, false);
-  extract_AD_derivatives(true, false);
-}
-
-void
-Model::value_and_dvalue_and_d2value()
-{
-  enable_AD();
-  set_value(true, true, true);
-  extract_AD_derivatives(true, true);
-}
-
-void
-Model::dvalue_and_d2value()
-{
-  enable_AD();
-  set_value(AD_need_value(true, true), true, true);
-  extract_AD_derivatives(true, true);
-}
-
-void
-Model::d2value()
-{
-  enable_AD();
-  set_value(AD_need_value(false, true), false, true);
-  extract_AD_derivatives(false, true);
+  const auto secderivs = collect_output_second_derivatives();
+  clear_input();
+  clear_output();
+  return secderivs;
 }
 
 Model *
@@ -331,6 +453,37 @@ Model::provided_items() const
 }
 
 void
+Model::assign_input_stack(torch::jit::Stack & stack)
+{
+#ifndef NDEBUG
+  const auto nstack = input_axis().nvariable() + host<ParameterStore>()->named_parameters().size();
+  neml_assert_dbg(
+      stack.size() == nstack,
+      "Stack size (",
+      stack.size(),
+      ") must equal to the number of input variables, parameters, and buffers in the model (",
+      nstack,
+      ").");
+#endif
+
+  assign_parameter_stack(stack);
+  VariableStore::assign_input_stack(stack);
+}
+
+torch::jit::Stack
+Model::collect_input_stack() const
+{
+  auto stack = VariableStore::collect_input_stack();
+  const auto param_stack = collect_parameter_stack();
+
+  // Recall stack is first in last out.
+  // Parameter stack go after (on top of) input variables. This means that in assign_input_stack
+  // we need to pop parameters first, then input variables.
+  stack.insert(stack.end(), param_stack.begin(), param_stack.end());
+  return stack;
+}
+
+void
 Model::set_guess(const Sol<false> & x)
 {
   const auto sol_assember = VectorAssembler(input_axis().subaxis(STATE));
@@ -340,12 +493,7 @@ Model::set_guess(const Sol<false> & x)
 void
 Model::assemble(NonlinearSystem::Res<false> * residual, NonlinearSystem::Jac<false> * Jacobian)
 {
-  if (residual && !Jacobian)
-    value();
-  else if (!residual && Jacobian)
-    dvalue();
-  else if (residual && Jacobian)
-    value_and_dvalue();
+  forward_maybe_jit(residual, Jacobian, false);
 
   if (residual)
   {
@@ -388,8 +536,6 @@ Model::extract_AD_derivatives(bool dout, bool d2out)
 {
   neml_assert(dout || d2out, "At least one of the output derivatives must be requested.");
 
-  bool create_graph = false;
-
   for (auto && [y, us] : _ad_derivs)
   {
     if (!dout && d2out)
@@ -398,6 +544,7 @@ Model::extract_AD_derivatives(bool dout, bool d2out)
 
     for (const auto * u : us)
     {
+      bool create_graph = false;
       if (!dout && d2out)
       {
         if (!_ad_secderivs.at(y).count(u))

@@ -124,6 +124,18 @@ ComposedModel::ComposedModel(const OptionSet & options)
       if (_nl_params.count(pname))
         _nl_param_models[pname] = pmodel;
   }
+
+  // Is JIT enabled?
+  _jit = Model::is_jit_enabled(); // boolean read from input file
+
+  // If any submodel does not support JIT, disable JIT
+  if (_jit)
+    for (const auto * submodel : registered_models())
+      if (!submodel->is_jit_enabled())
+      {
+        _jit = false;
+        break;
+      }
 }
 
 std::map<std::string, const VariableBase *>
@@ -167,11 +179,11 @@ ComposedModel::set_value(bool out, bool dout_din, bool d2out_din2)
   for (auto * i : registered_models())
   {
     if (out && !dout_din && !d2out_din2)
-      i->value();
+      i->forward_maybe_jit(true, false, false);
     else if (dout_din && !d2out_din2)
-      i->value_and_dvalue();
+      i->forward_maybe_jit(true, true, false);
     else if (d2out_din2)
-      i->value_and_dvalue_and_d2value();
+      i->forward_maybe_jit(true, true, true);
     else
       throw NEMLException("Unsupported call signature to set_value");
   }

@@ -24,6 +24,8 @@
 
 #pragma once
 
+#include <torch/csrc/jit/api/function_impl.h>
+
 #include "neml2/base/DependencyDefinition.h"
 #include "neml2/base/DiagnosticsInterface.h"
 
@@ -50,6 +52,18 @@ class Model : public std::enable_shared_from_this<Model>,
               public DiagnosticsInterface
 {
 public:
+  /**
+   * @brief Schema for the traced forward operators
+   *
+   * The schema is determined by the batch dimensions of all input variables and model parameters.
+   */
+  struct TraceSchema
+  {
+    std::vector<Size> batch_dims;
+    bool operator==(const TraceSchema & other) const;
+    bool operator<(const TraceSchema & other) const;
+  };
+
   static OptionSet expected_options();
 
   /**
@@ -67,6 +81,9 @@ public:
   /// Whether this model defines one or more nonlinear equations to be solved
   virtual bool is_nonlinear_system() const { return _nonlinear_system; }
 
+  /// Whether JIT is enabled
+  virtual bool is_jit_enabled() const { return _jit; }
+
   /// The models that may be used during the evaluation of this model
   const std::vector<Model *> & registered_models() const { return _registered_models; }
   /// Get a registered model by its name
@@ -77,29 +94,27 @@ public:
   /// The variables that this model defines as part of its output
   std::set<VariableName> provided_items() const override;
 
-  void clear_input() override;
-  void clear_output() override;
-  void zero_input() override;
-  void zero_output() override;
-
   /// Request to use AD to compute the first derivative of a variable
   void request_AD(VariableBase & y, const VariableBase & u);
 
   /// Request to use AD to compute the second derivative of a variable
   void request_AD(VariableBase & y, const VariableBase & u1, const VariableBase & u2);
 
-  /// Evalute the model
-  virtual void value();
-  /// Evalute the model and compute its derivative
-  virtual void value_and_dvalue();
-  /// Evalute the derivative
-  virtual void dvalue();
-  /// Evalute the model and compute its first and second derivatives
-  virtual void value_and_dvalue_and_d2value();
-  /// Evalute the second derivatives
-  virtual void d2value();
-  /// Evalute the first and second derivatives
-  virtual void dvalue_and_d2value();
+  /// Forward operator without jit
+  void forward(bool out, bool dout, bool d2out);
+
+  /**
+   * @brief Forward operator with jit
+   *
+   * If _jit is false, this falls back to the non-jit version.
+   *
+   * If _jit is true, it will use the corresponding traced graph as the forward operator,
+   * and if the corresponding traced graph does not exists, it will create one.
+   */
+  void forward_maybe_jit(bool out, bool dout, bool d2out);
+
+  /// Look up the name of a variable in the traced graph
+  std::string variable_name_lookup(const torch::Tensor & var);
 
   /// Convenient shortcut to construct and return the model value
   virtual ValueMap value(const ValueMap & in);
@@ -132,6 +147,11 @@ protected:
   virtual void link_input_variables(Model * submodel);
   virtual void link_output_variables();
   virtual void link_output_variables(Model * submodel);
+
+  void clear_input() override;
+  void clear_output() override;
+  void zero_input() override;
+  void zero_output() override;
 
   /**
    * Request the use of automatic differentiation to compute variable derivatives
@@ -188,6 +208,10 @@ protected:
     return *(std::dynamic_pointer_cast<T>(model));
   }
 
+  void assign_input_stack(torch::jit::Stack & stack);
+
+  torch::jit::Stack collect_input_stack() const;
+
   void set_guess(const Sol<false> &) override;
 
   void assemble(Res<false> *, Jac<false> *) override;
@@ -206,14 +230,51 @@ private:
   /// Extract the AD derivatives of the output variables
   void extract_AD_derivatives(bool dout, bool d2out);
 
+  /// Get the traced function for the forward operator
+  std::size_t forward_operator_index(bool out, bool dout, bool d2out) const;
+
+  /// Compute the trace schema
+  TraceSchema compute_trace_schema() const;
+
   /// Whether this is a nonlinear system
   bool _nonlinear_system;
 
+  ///@{
   /// The variables that are requested to be differentiated
   std::map<VariableBase *, std::set<const VariableBase *>> _ad_derivs;
   std::map<VariableBase *, std::map<const VariableBase *, std::set<const VariableBase *>>>
       _ad_secderivs;
   std::set<VariableBase *> _ad_args;
+  ///@}
+
+  /// Whether to use JIT
+  const bool _jit;
+
+  /// Whether to use production mode
+  const bool _production;
+
+  /**
+   * @brief Cached function graphs and their schema for forward operators
+   *
+   * The index is the binary encoding of the tuple (out, dout, d2out)
+   *
+   * See the table below
+   * Decimal index, Binary index, Value, Derivative, 2nd derivative
+   * 0, 000, no, no, no  <-- We don't provide this API
+   * 1, 001, no, no, yes
+   * 2, 010, no, yes, no
+   * 3, 011, no, yes, yes
+   * 4, 100, yes, no, no
+   * 5, 101, yes, no, yes  <-- We don't provide this API
+   * 6, 110, yes, yes, no
+   * 7, 111, yes, yes, yes
+   */
+  std::array<std::map<TraceSchema, std::unique_ptr<torch::jit::GraphFunction>>, 8>
+      _traced_functions;
+
+  /// Similar to _trace_functions, but for the forward operator of the nonlinear system
+  std::array<std::map<TraceSchema, std::unique_ptr<torch::jit::GraphFunction>>, 8>
+      _traced_functions_nl_sys;
 };
 
 std::ostream & operator<<(std::ostream & os, const Model & model);
