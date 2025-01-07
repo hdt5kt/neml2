@@ -11,12 +11,14 @@ The particular liquid filtration model composed in NEML2 is derived based on a s
 
 ### Representative Volume Element
 
-The infiltration process for a material considers a cylindrical Representative Volume Element (RVE) with radius \f$R\f$ and height \f$H\f$, depicting a solid capillary of radius \f$r_0\f$, corresponding to the initial porosity of \f$\sqrt{\varphi_0}\f$. The mathematical description of the model uses cylindrical coordinates and assumes axisymmetry around \f$r = 0\f$. A schematic illustration of the RVE is shown in the [figure below](@ref rve).
+The infiltration process for a material considers a cylindrical Representative Volume Element (RVE) with radius \f$R\f$ and height \f$H\f$, depicting a solid capillary of radius \f$r_0\f$, corresponding to the initial porosity of \f$\varphi_0\f$. The mathematical description of the model uses cylindrical coordinates and assumes axisymmetry around \f$r = 0\f$. A schematic illustration of the RVE is shown in the [figure below](@ref rve).
 
 \anchor rve
 
 ![Fig. 1: RVE -- need to be updated][rve]{html: width=75%}
 [rve]: asset/lsi_rve.png
+
+<span style="color:red">Add some description of the figure, introduce geometrical quantities.</span>
 
 The span of liquid \f$(L)\f$ and product \f$(P)\f$ are denoted by \f$h_L\f$ and \f$h_P\f$, respectively. In addition, define \f$\alpha_i\f$ as the amount of substance in the RVE and \f$\Omega_i\f$ as the molar volume (substance per volume), with subscripts taking \f$L\f$, \f$S\f$, and \f$P\f$, respectively.
 
@@ -32,15 +34,14 @@ Key assumptions made throughout the derivation are:
 -  In the abundance of liquid, the height of the product layer follows the liquid front.
 
 The following nondimensionalization is applied to the constitutive model for the reactive infiltration process.
-\f[
-    \begin{equation}
-        \begin{aligned}
-            &\ \bar{\delta}_P = \frac{\delta_P}{R}, \quad \bar{r}_0 = \dfrac{r_0}{R} = \sqrt{\varphi_0}, \quad \bar{r}_1 = \dfrac{r_1}{R} = \sqrt{\varphi_0} -M\bar{\delta}_P \\
-            &\ \bar{h}_P = \frac{h_P}{H}, \quad \bar{h}_L = \frac{h_L}{H}=\frac{\alpha_L\Omega_L}{\bar{r}_1^2}.
-        \end{aligned}
-    \end{equation}
-\f]
+\f{align*}
+    &\ \bar{\delta}_P = \frac{\delta_P}{R}, \quad \bar{r}_0 = \dfrac{r_0}{R} = \sqrt{\varphi_0}, \quad \bar{r}_1 = \dfrac{r_1}{R} = \sqrt{\varphi_0} -M{\bar{\delta}_P^*}^2 \\
+    &\ \bar{h}_P = \frac{h_P}{H}, \quad \bar{h}_L = \frac{h_L}{H}=\frac{\alpha_L\Omega_L}{\bar{r}_1^2}.
+\f}
 The complete state of the RVE is denoted by the tuple \f$\left( \alpha_L, \bar{\delta}_P^*, \bar{h}_P \right)\f$, where \f$\bar{\delta}_P^* = \sqrt{\bar{\delta}_P}\f$.
+
+\note
+Explain the positivity-preserving lifting transformation.
 
 The effective porosity can be written in terms of the nondimensional variables as
 \f[
@@ -59,325 +60,92 @@ The following constraints apply to the reaction constitutive model:
         \bar{r}_1 \ge 0
     \f]
     When \f$\bar{r}_1=0\f$, no liquid can enter the RVE, i.e. \f$\dot{\alpha}_L^I=0\f$. Therefore, the simulation is halted.
-- The reaction stops when there is no carbon remaining in the RVE,
+- The reaction stops when there is no solid remaining in the RVE,
     \f[
         \bar{\delta}_P \le \min\left(\dfrac{1-\sqrt{\varphi_0}}{1-M },\dfrac{\sqrt{\varphi_0}}{M}\right)=\bar{\delta}_P^c.
     \f]
-    Here, within our assumption that the silicon carbide wall thickness remains uniform during the infiltration, Product layer only grows in the \f$+z\f$ direction. The reaction equation becomes
+    Here, within our assumption that the product layer front remains uniform during the infiltration, product layer only grows in the \f$+z\f$ direction. The reaction equation becomes
     \f[
         \dot{\bar{\delta}}_P = 0
     \f]
-- The silicon carbide layer cannot span beyond the RVE,
-    \f[
+- Since the product layer cannot span beyond the RVE, the outflow rate should satisfy
+    \f{align*}
+        \dot{\alpha}_L^O = \begin{cases}
+            0, \text{ if } \bar{h}_L < 1, \\
+            \dot{\alpha}_L^I, \text{ if } \bar{h}_L = 1.
+        \end{cases}
+    \f}
+- <span style="color:red">Try to explain why \f$\bar{h}_p \leq 1\f$ is self-enforced.</span>
+    <!-- \f[
         \bar{h}_P \le 1.
     \f]
-    Since \f$\bar{h}_P\f$ is irreversible, \f$\bar{h}_P = 1\f$ corresponds to \f$\bar{\dot{h}}_P = 0\f$, implies
+    Since \f$\bar{h}_P\f$ is irreversible, \f$\bar{h}_P = 1\f$ corresponds to \f$\dot{\bar{h}}_P = 0\f$, which implies
     \f[
-        \dot{\alpha}_L^O = \dot{\alpha}_L^I
+        \dot{\alpha}_L^O = \dot{\alpha}_L^I,
     \f]
-    where the injection rate of Liquid \f$\dot{\alpha}_L^I\f$ is prescribed. \f$\dot{\alpha}_L^O\f$ represents the outflow of Liquid
-
-> \f$\dot{\alpha}_L^O = 0\f$ for \f$h_L<1\f$.
+    where \f$\dot{\alpha}_L^O\f$ represents the outflow rate of liquid. Note \f$\dot{\alpha}_L^O = 0\f$ for \f$h_L<1\f$. -->
 
 ### Governing Equations
 
-When including the constraint, the initial-value problem (IVP) corresponding to the constitutive model is
-
-- The growth of Product thickness in the \f$\pm r\f$ direction (`ProductThicknessGrowthRate` model),
+When including the constraints, the initial-value problem (IVP) corresponding to the constitutive model is
 \f[
-   \dot{\bar{\delta}}_P = R(\bar{h}_L,\bar{h}_P) G \left[1-H\left(\dfrac{\bar{\delta}_P}{\bar{\delta}_P^c}-1 \right)\right]
+    \mathbf{r} = \begin{Bmatrix}
+        r_\delta \\
+        r_h \\
+        r_\alpha
+    \end{Bmatrix} = \mathbf{0},
 \f]
-    Here \f$G\f$ denotes the thickeness growth of the Product when Liquid in abundant. When the Liquid is deficient, the Product's thickness growth is reduced by a factor of \f$R\f$.
-    \f$H(x)\f$ is a Heaviside function.
+where \f$r_\delta\f$ is the residual corresponding to the product thickness growth, \f$r_h\f$ is the residual corresponding to the product span growth, and \f$r_\alpha\f$ defines the local mass balance for the liquid. The residuals are defined below. Note an implicit backward-Euler time integration scheme is used.
 
-    For the current implementation,
+- Product thickness growth
+    \f{align*}
+        r_\delta &= \bar{\delta}_{P,n+1} - \bar{\delta}_{P,n} - \dot{\bar{\delta}}_P^* (t_{n+1} - t_n) = 0, \\
+        \dot{\bar{\delta}}_P^* &= R G \left[1-H\left(\dfrac{\bar{\delta}_{P, n+1}}{\bar{\delta}_P^c}-1 \right)\right]
+    \f}
+    Here \f$H(x)\f$ is the Heaviside function, and \f$G\f$ denotes the thickeness growth of the product when liquid in abundant. When there is insufficient liquid, the product's thickness growth is reduced by a factor \f$R\f$.
+
+- Product span growth:
+    The growth of span in the \f$ z \f$ direction takes the form of the Fischer-Burmeister complementarity condition:
     \f[
-        R(\bar{h}_L,\bar{h}_P) = \left\{\dfrac{\bar{h}_L}{\bar{h}_P}\right\}^p
+        r_h = \phi + \dot{\bar{h}}_P - \sqrt{ \phi^2 + \dot{\bar{h}}_P^2 } = 0, \quad \phi = \bar{h}_{P, n+1} - \bar{h}_{L},
     \f]
-    with \f$\{.\}\f$ denotes the Macaulay brackets to ensure \f$\left(\dfrac{\bar{h}_L}{\bar{h}_P}\right)^p\f$ has real values. This is done with `LiquidDeficientPowerScale` model.
-
-    and
+    which is equivalent to the KKT conditions,
     \f[
-        G = \bar{D} \frac{\rho_L}{\rho_P} \frac{\bar{r}_1} {\bar{\delta}_P\left[\sqrt{\varphi_0}+(1-2M)\bar{\delta}_P\right]}
+        \phi \geq 0, \quad \dot{\bar{h}}_P \geq 0, \quad \phi \dot{\bar{h}}_P = 0,
     \f]
-    with \f$\rho_L, \rho_P\f$ denotes the density of Liquid and Product respectively. \f$G\f$ is derived based on 1D diffusion of Liquid through the Product to react with the Solid at the Solid-Product interface, accounting for the polar coordinate system of the RVE. This is done with `LiquidProductDiffusion1D` model.
+    where \f$\phi\f$ is the product span growth function.
+- Local mass balance for the liquid
+    \f{align*}
+        r_\alpha &= \dfrac{\alpha_{L, n+1} - \alpha_{L, n}}{t_{n+1}-t_n} - \left( \dot{\alpha}_L^I + \dot{\alpha}_L^R +\dot{\alpha}_L^O \right) = 0, \\
+        \dot{\alpha}_L^R &= -\nu \dfrac{\alpha_{P, n+1} - \alpha_{P, n}}{t_{n+1}-t_n}.
+    \f}
+    where \f$\dot{\alpha}_L^R\f$ is the liquid reaction rate, and \f$\nu\f$ is the stoichiometric coefficient of the reaction.
 
-- The growth of Product height in the \f$ z \f$ direction (`ProductGrowthWithLiquid` model)
+### Constitutive choices and implementational details
+
+The above governing equations are fairly general for a wide range of liquid infiltration systems within this framework. To complete the definition of the constitutive model, two constitutive choices have to be made for \f$R\f$ and \f$G\f$. Here, we choose
+\f{align*}
+    G &= \dfrac{D}{l_c^2} \frac{\rho_L}{\rho_P} \frac{\bar{r}_1} {2{\bar{\delta}_P^*}^3\left[\sqrt{\varphi_0}+(1-2M){\bar{\delta}^*_P}^2\right]}, \\
+    R &= \left<\dfrac{\bar{h}_L}{\bar{h}_P}\right>^p,
+\f}
+where \f$\left< \cdot \right>\f$ is the Macaulay bracket.
+
+From geometric relations, we also have
 \f[
-    \phi = \bar{r}_1^2 \bar{h}_P - \alpha_L\Omega_L \geq 0, \quad \dot{\bar{h}}_P \geq 0, \quad \phi \dot{\bar{h}}_P = 0,
+    \alpha_P = \dfrac{\bar{h}_P}{\Omega_P} \left( 2\bar{r}_1 {\bar{\delta}_P^*}^2 + {\bar{\delta}_P^*}^4 \right).
 \f]
-    This is equivalent to the Fischer-Burmeister complementary condition (`FischerBurmeister` model),
-\f[
-  \phi + \dot{\bar{h}}_P - \sqrt{ \phi^2 + \dot{\bar{h}}_P^2 } = 0
-\f]
-- The local Liquid mass balance (`ChemMassBalance` model)
-\f[
-     \dot{\alpha}_L = \dot{\alpha}_L^I + \dot{\alpha}_L^R +\dot{\alpha}_L^O
-\f]
-    where
-\f[
-    \dot{\alpha}_L^R = \dot{\alpha}_S = -\dot{\alpha}_P
-\f]
-This is done with Composing two models: `ProductGeometricRelation` and `VariableRate`.
 
-An implicit time integration scheme is required to solve this stiff IVP with a reasonable time step size. This is done with `ImplicitUpdate` model.
-
-### Complete Input File
-A complete example input file for the Liquid Infiltration is shown below with all of the appropriate composition models. The parameters are chosen to reflect liquid Silicon infiltrated a porous Carbon with Silicon Carbide as a product.
-
-```
-[Tensors]
-    ############### Run condition ###############
-    [times]
-        type = ScalarFromTorchScript
-        pytorch_pt_file = 'aLIndot.pt'
-        tensor_name = 'time'
-    []
-    [aLInDot]
-        type = ScalarFromTorchScript
-        pytorch_pt_file = 'aLIndot.pt'
-        tensor_name = 'data'
-    []
-    ############### Simulation parameters ###############
-    [M]
-        type = Scalar
-        values = '0.1'
-        batch_shape = '${nbatch}'
-    []
-    [phi0]
-        type = Scalar
-        values = '0.1'
-        batch_shape = '${nbatch}'
-    []
-    [omega_L]
-        type = Scalar
-        values = 1.2e-5
-        batch_shape = '${nbatch}'
-    []
-    [omega_P]
-        type = Scalar
-        values = 1.25e-5
-        batch_shape = '${nbatch}'
-    []
-    [p]
-        type = Scalar
-        values = '0.25 0.5 1.0 2.0 5.0'
-        batch_shape = '${nbatch}'
-    []
-    [lc]
-        type = Scalar
-        values = '2.236'
-        batch_shape = '${nbatch}'
-    []
-[]
-
-[Drivers]
-    [driver]
-      type = LiquidInfiltrationDriver
-      model = 'model'
-      prescribed_time = 'times'
-      time = 'forces/tt'
-
-      prescribed_liquid_inlet_rate = 'aLInDot'
-      liquid_inlet_rate = 'forces/aLInDot'
-
-      show_input_axis = true
-      show_output_axis = true
-      show_parameters = false
-      ic_Scalar_names = 'state/alpha state/delta state/h state/alphaP'
-      ic_Scalar_values = '1e-4 1e-2 1e-3 1e-3'
-      save_as = 'test.pt'
-
-      verbose = true
-    []
-    [regression]
-      type = TransientRegression
-      driver = 'driver'
-      reference = 'gold/result.pt'
-    []
-  []
-
-[Solvers]
-    [newton]
-        type = NewtonWithLineSearch
-        linesearch_type = STRONG_WOLFE
-        rel_tol = 1e-8
-        abs_tol = 1e-10
-        max_its = 100
-        verbose = true
-    []
-[]
-
-[Models]
-    [inlet_gap]
-        type = InletGap
-        product_thickness_growth_ratio = 'M'
-        initial_porosity = 'phi0'
-        product_thickness = 'state/delta'
-        inlet_gap = 'state/r1'
-    []
-    [product_growth]
-        type = ProductGrowthWithLiquid
-        liquid_molar_volume = 'omega_L'
-        product_height = 'state/h'
-        inlet_gap = 'state/r1'
-        liquid_saturation = 'state/alpha'
-        phi_condition = 'state/pcond'
-    []
-    [hdot]
-        type = ScalarVariableRate
-        variable = 'state/h'
-        time = 'forces/tt'
-        rate = 'state/hdot'
-    []
-    [fbcond]
-        type = FischerBurmeister
-        condition_a = 'state/pcond'
-        condition_b = 'state/hdot'
-        fischer_burmeister = 'residual/h'
-    []
-    ############### H RESIDUAL ###############
-    [residual_h]
-        type = ComposedModel
-        models = 'fbcond inlet_gap product_growth hdot'
-    []
-    #############################################
-    [product_geo]
-        type = ProductGeometricRelation
-        product_molar_volume = 'omega_P'
-        product_height = 'state/h'
-        inlet_gap = 'state/r1'
-        product_thickness = 'state/delta'
-        product_saturation = 'state/alphaP'
-    []
-    [alpha_transition]
-        type = SwitchingFunction
-        smooth_degree = 100.0
-        smooth_type = 'SIGMOID'
-        scale = 1.0
-        offset = 1.0
-        one_subtract_condition = true
-        variable = 'state/h'
-        switch_out = 'state/alpha_transition'
-    []
-    [aR_dot]
-        type = ScalarVariableRate
-        variable = 'state/alphaP'
-        time = 'forces/tt'
-        rate = 'state/aRdot'
-    []
-    [alpha_dot]
-        type = ScalarVariableRate
-        variable = 'state/alpha'
-        time = 'forces/tt'
-        rate = 'state/alphadot'
-    []
-    [mass_balance]
-        type = ChemMassBalance
-        in = 'forces/aLInDot'
-        switch = 'state/alpha_transition'
-        minus_reaction = 'state/aRdot'
-        current = 'state/alphadot'
-        total = 'residual/alpha'
-    []
-    ############### ALPHA RESIDUAL ###############
-    [residual_alpha]
-        type = ComposedModel
-        models = 'product_geo inlet_gap alpha_transition aR_dot alpha_dot mass_balance'
-    []
-    #############################################
-    [deficient_scale]
-        type = LiquidDeficientPowerScale
-        liquid_molar_volume = 'omega_L'
-        power = 'p'
-        product_height = 'state/h'
-        inlet_gap = 'state/r1'
-        liquid_saturation = 'state/alpha'
-        scale = 'state/def_scale'
-    []
-    [perfect_growth]
-        type = LiquidProductDiffusion1D
-        liquid_product_density_ratio = 0.8
-        initial_porosity = 'phi0'
-        product_thickness_growth_ratio = 'M'
-        liquid_product_diffusion_coefficient = 5e-7
-        representative_pores_size = 'lc'
-
-        inlet_gap = 'state/r1'
-        product_thickness = 'state/delta'
-        ideal_thickness_growth = 'state/delta_growth'
-    []
-    [delta_dcrit_ratio]
-        type = ProductThicknessLimit
-        initial_porosity = 'phi0'
-        product_thickness_growth_ratio = 'M'
-        product_thickness = 'state/delta'
-        limit_ratio = 'state/dratio'
-    []
-    [delta_limit]
-        type = SwitchingFunction
-        smooth_degree = 100.0
-        smooth_type = 'SIGMOID'
-        scale = 1.0
-        offset = 1.0
-        one_subtract_condition = true
-        variable = 'state/dratio'
-        switch_out = 'state/dlimit'
-    []
-    [ddot]
-        type = ScalarVariableRate
-        variable = 'state/delta'
-        time = 'forces/tt'
-        rate = 'state/ddot'
-    []
-    [product_thickness_growth]
-        type = ProductThicknessGrowthRate
-        thickness_rate = 'state/ddot'
-        scale = 'state/def_scale'
-        ideal_thickness_growth = 'state/delta_growth'
-        switch = 'state/dlimit'
-        residual_delta = 'residual/delta'
-    []
-    ############### DELTA RESIDUAL ###############
-    [residual_delta]
-        type = ComposedModel
-        models = 'deficient_scale inlet_gap perfect_growth delta_dcrit_ratio delta_limit ddot product_thickness_growth'
-    []
-    #############################################
-    [model_residual]
-        type = ComposedModel
-        models = 'residual_h residual_alpha residual_delta'
-        automatic_scaling = true
-    []
-    [model_update]
-        type = ImplicitUpdate
-        implicit_model = 'model_residual'
-        solver = 'newton'
-    []
-    [aSiC_new]
-        type = ProductGeometricRelation
-        product_molar_volume = 'omega_P'
-        product_height = 'state/h'
-        inlet_gap = 'state/r1'
-        product_thickness = 'state/delta'
-        product_saturation = 'state/alphaP'
-    []
-    [model]
-        type = ComposedModel
-        models = 'model_update inlet_gap aSiC_new'
-        additional_outputs = 'state/delta state/h'
-    []
-[]
-```
+With that, the constitutive model is completely defined. The following table summarizes the relationship between mathematical expressions and NEML2 models.
+| Expression                                                                 | Model building block  | Syntax            |
+| :------------------------------------------------------------------------- | :-------------------- | :---------------- |
+| \f$\bar{r}_1 = \dfrac{r_1}{R} = \sqrt{\varphi_0} -M{\bar{\delta}_P^*}^2\f$ | [InletGap](#InletGap) | [link](#inletgap) |
 
 
-## Supporting model
+## Model building blocks
 
-These sub-models are built in order to solve the IVP - 3 equations with 3 unknowns \f$\left( \alpha_L, \bar{\delta}_P^*, \bar{h}_P \right)\f$, where \f$\bar{\delta}_P^* = \sqrt{\bar{\delta}_P}\f$. For details input and output of each model, refer to the Syuntax Documentaion.
+These sub-models are built in order to solve the IVP - 3 equations with 3 unknowns \f$\left( \alpha_L, \bar{\delta}_P^*, \bar{h}_P \right)\f$, where \f$\bar{\delta}_P^* = \sqrt{\bar{\delta}_P}\f$.
 
-> CAUTION: The state variable for all of these models is \f$\bar{\delta}_P^*\f$!
-
-### Size of the Inlet
+### Size of the Inlet {#InletGap}
 Model object: `InletGap`
 
 This model calculates the inlet size of the RVE, following
@@ -637,3 +405,252 @@ Example input file that defines the Liquid total mass balance.
 []
 ```
 
+
+## Complete Input File
+
+A complete example input file for the liquid infiltration is shown below with the appropriate model composition. The parameters are chosen to reflect a liquid silicon infiltration (LSI) process.
+
+```
+[Tensors]
+    ############### Run condition ###############
+    [times]
+        type = ScalarFromTorchScript
+        pytorch_pt_file = 'aLIndot.pt'
+        tensor_name = 'time'
+    []
+    [aLInDot]
+        type = ScalarFromTorchScript
+        pytorch_pt_file = 'aLIndot.pt'
+        tensor_name = 'data'
+    []
+    ############### Simulation parameters ###############
+    [M]
+        type = Scalar
+        values = '0.1'
+        batch_shape = '${nbatch}'
+    []
+    [phi0]
+        type = Scalar
+        values = '0.1'
+        batch_shape = '${nbatch}'
+    []
+    [omega_L]
+        type = Scalar
+        values = 1.2e-5
+        batch_shape = '${nbatch}'
+    []
+    [omega_P]
+        type = Scalar
+        values = 1.25e-5
+        batch_shape = '${nbatch}'
+    []
+    [p]
+        type = Scalar
+        values = '0.25 0.5 1.0 2.0 5.0'
+        batch_shape = '${nbatch}'
+    []
+    [lc]
+        type = Scalar
+        values = '2.236'
+        batch_shape = '${nbatch}'
+    []
+[]
+
+[Drivers]
+    [driver]
+      type = LiquidInfiltrationDriver
+      model = 'model'
+      prescribed_time = 'times'
+      time = 'forces/tt'
+
+      prescribed_liquid_inlet_rate = 'aLInDot'
+      liquid_inlet_rate = 'forces/aLInDot'
+
+      show_input_axis = true
+      show_output_axis = true
+      show_parameters = false
+      ic_Scalar_names = 'state/alpha state/delta state/h state/alphaP'
+      ic_Scalar_values = '1e-4 1e-2 1e-3 1e-3'
+      save_as = 'test.pt'
+
+      verbose = true
+    []
+    [regression]
+      type = TransientRegression
+      driver = 'driver'
+      reference = 'gold/result.pt'
+    []
+  []
+
+[Solvers]
+    [newton]
+        type = NewtonWithLineSearch
+        linesearch_type = STRONG_WOLFE
+        rel_tol = 1e-8
+        abs_tol = 1e-10
+        max_its = 100
+        verbose = true
+    []
+[]
+
+[Models]
+    [inlet_gap]
+        type = InletGap
+        product_thickness_growth_ratio = 'M'
+        initial_porosity = 'phi0'
+        product_thickness = 'state/delta'
+        inlet_gap = 'state/r1'
+    []
+    [product_growth]
+        type = ProductGrowthWithLiquid
+        liquid_molar_volume = 'omega_L'
+        product_height = 'state/h'
+        inlet_gap = 'state/r1'
+        liquid_saturation = 'state/alpha'
+        phi_condition = 'state/pcond'
+    []
+    [hdot]
+        type = ScalarVariableRate
+        variable = 'state/h'
+        time = 'forces/tt'
+        rate = 'state/hdot'
+    []
+    [fbcond]
+        type = FischerBurmeister
+        condition_a = 'state/pcond'
+        condition_b = 'state/hdot'
+        fischer_burmeister = 'residual/h'
+    []
+    ############### H RESIDUAL ###############
+    [residual_h]
+        type = ComposedModel
+        models = 'fbcond inlet_gap product_growth hdot'
+    []
+    #############################################
+    [product_geo]
+        type = ProductGeometricRelation
+        product_molar_volume = 'omega_P'
+        product_height = 'state/h'
+        inlet_gap = 'state/r1'
+        product_thickness = 'state/delta'
+        product_saturation = 'state/alphaP'
+    []
+    [alpha_transition]
+        type = SwitchingFunction
+        smooth_degree = 100.0
+        smooth_type = 'SIGMOID'
+        scale = 1.0
+        offset = 1.0
+        one_subtract_condition = true
+        variable = 'state/h'
+        switch_out = 'state/alpha_transition'
+    []
+    [aR_dot]
+        type = ScalarVariableRate
+        variable = 'state/alphaP'
+        time = 'forces/tt'
+        rate = 'state/aRdot'
+    []
+    [alpha_dot]
+        type = ScalarVariableRate
+        variable = 'state/alpha'
+        time = 'forces/tt'
+        rate = 'state/alphadot'
+    []
+    [mass_balance]
+        type = ChemMassBalance
+        in = 'forces/aLInDot'
+        switch = 'state/alpha_transition'
+        minus_reaction = 'state/aRdot'
+        current = 'state/alphadot'
+        total = 'residual/alpha'
+    []
+    ############### ALPHA RESIDUAL ###############
+    [residual_alpha]
+        type = ComposedModel
+        models = 'product_geo inlet_gap alpha_transition aR_dot alpha_dot mass_balance'
+    []
+    #############################################
+    [deficient_scale]
+        type = LiquidDeficientPowerScale
+        liquid_molar_volume = 'omega_L'
+        power = 'p'
+        product_height = 'state/h'
+        inlet_gap = 'state/r1'
+        liquid_saturation = 'state/alpha'
+        scale = 'state/def_scale'
+    []
+    [perfect_growth]
+        type = LiquidProductDiffusion1D
+        liquid_product_density_ratio = 0.8
+        initial_porosity = 'phi0'
+        product_thickness_growth_ratio = 'M'
+        liquid_product_diffusion_coefficient = 5e-7
+        representative_pores_size = 'lc'
+
+        inlet_gap = 'state/r1'
+        product_thickness = 'state/delta'
+        ideal_thickness_growth = 'state/delta_growth'
+    []
+    [delta_dcrit_ratio]
+        type = ProductThicknessLimit
+        initial_porosity = 'phi0'
+        product_thickness_growth_ratio = 'M'
+        product_thickness = 'state/delta'
+        limit_ratio = 'state/dratio'
+    []
+    [delta_limit]
+        type = SwitchingFunction
+        smooth_degree = 100.0
+        smooth_type = 'SIGMOID'
+        scale = 1.0
+        offset = 1.0
+        one_subtract_condition = true
+        variable = 'state/dratio'
+        switch_out = 'state/dlimit'
+    []
+    [ddot]
+        type = ScalarVariableRate
+        variable = 'state/delta'
+        time = 'forces/tt'
+        rate = 'state/ddot'
+    []
+    [product_thickness_growth]
+        type = ProductThicknessGrowthRate
+        thickness_rate = 'state/ddot'
+        scale = 'state/def_scale'
+        ideal_thickness_growth = 'state/delta_growth'
+        switch = 'state/dlimit'
+        residual_delta = 'residual/delta'
+    []
+    ############### DELTA RESIDUAL ###############
+    [residual_delta]
+        type = ComposedModel
+        models = 'deficient_scale inlet_gap perfect_growth delta_dcrit_ratio delta_limit ddot product_thickness_growth'
+    []
+    #############################################
+    [model_residual]
+        type = ComposedModel
+        models = 'residual_h residual_alpha residual_delta'
+        automatic_scaling = true
+    []
+    [model_update]
+        type = ImplicitUpdate
+        implicit_model = 'model_residual'
+        solver = 'newton'
+    []
+    [aSiC_new]
+        type = ProductGeometricRelation
+        product_molar_volume = 'omega_P'
+        product_height = 'state/h'
+        inlet_gap = 'state/r1'
+        product_thickness = 'state/delta'
+        product_saturation = 'state/alphaP'
+    []
+    [model]
+        type = ComposedModel
+        models = 'model_update inlet_gap aSiC_new'
+        additional_outputs = 'state/delta state/h'
+    []
+[]
+```
