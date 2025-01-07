@@ -2,29 +2,36 @@
 
 [TOC]
 
-The liquid infiltration physics module is a collection objects serving as building blocks for composing material chemical and physical interaction between the solid (\f$S\f$), infiltrated by liquid (\f$L\f$) to create a product (\f$P\f$) at the solid-liquid interface. The framework and usage of the model is explained below, with both mathematical formulations and example input files.
+The liquid infiltration physics module is a collection of objects serving as building blocks for composing models describing infiltration kinetics as a solid \f$(S)\f$ material is infiltrated by a liquid \f$(L)\f$ to create a product \f$(P)\f$. The framework and usage of the model is explained below, with both mathematical formulations and example input files.
+
+\note
+The particular liquid filtration model composed in NEML2 is derived based on a set of [assumptions](@ref assumptions). However, the building blocks are general enough in the hope that they can be swapped out for different chemical interactions in a variety of systems.
 
 ## Framework
 
 ### Representative Volume Element
-The infiltration process for a material considers a cylindrical Representative Volume Element (RVE) with radius R and height H depicts a Solid capillary of radius \f$r_0\f$, corresponding to the initial porosity of \f$\sqrt{\varphi_0}\f$. The mathematical description of the model uses cylindrical coordinates and assumes axisymmetry around \f$ r = 0\f$. Figure below depicts the schematic for the RVE.
 
-The span of Liquid and the span of the Product layer are denoted by \f$h_L\f$ and \f$h_P\f$, respectively. In addition, define \f$\alpha_i\f$ as the amount of substance in the RVE and \f$\Omega_i\f$ as the molar volume (SI units: mol per volume), with subscripts taking \f$L\f$, \f$S\f$, and \f$P\f$ representing the infiltrated Liquid, the porous material Solid, and the Product produces by the chemical interaction between the Liquid and the Solid, respectively. 
+The infiltration process for a material considers a cylindrical Representative Volume Element (RVE) with radius \f$R\f$ and height \f$H\f$, depicting a solid capillary of radius \f$r_0\f$, corresponding to the initial porosity of \f$\sqrt{\varphi_0}\f$. The mathematical description of the model uses cylindrical coordinates and assumes axisymmetry around \f$r = 0\f$. A schematic illustration of the RVE is shown in the [figure below](@ref rve).
 
-![Fig. 1: RVE -- need to updated](asset/lsi_rve.png){html: width=100%} 
+\anchor rve
+
+![Fig. 1: RVE -- need to be updated][rve]{html: width=75%}
+[rve]: asset/lsi_rve.png
+
+The span of liquid \f$(L)\f$ and product \f$(P)\f$ are denoted by \f$h_L\f$ and \f$h_P\f$, respectively. In addition, define \f$\alpha_i\f$ as the amount of substance in the RVE and \f$\Omega_i\f$ as the molar volume (substance per volume), with subscripts taking \f$L\f$, \f$S\f$, and \f$P\f$, respectively.
+
+\anchor assumptions
 
 Key assumptions made throughout the derivation are:
 -  Liquid remains liquid over the entire course of reaction, i.e., no phase change.
 -  The reaction is irreversible.
--  Formation of the initial Product layer is immediate once Liquid comes into contact with Solid.
--  Once Product is formed, reaction rate is primarily limited by the diffusion of Liquid through Product to the Product-Solid interface.
--  The Product wall thickness remains uniform during the infiltration.
--  The Liquid front inside a capillary wall is flat.
--  In the abundance of Liquid, the height of Product layer follows the Liquid front. This assumptions might break down when the layer of Product is relatively thick.
+-  Formation of the initial product layer is immediate once liquid comes into contact with solid.
+-  Once product is formed, reaction rate is primarily limited by the diffusion of Liquid through product to the product-solid interface.
+-  The product wall thickness remains uniform during the infiltration.
+-  The liquid front inside a capillary wall is flat.
+-  In the abundance of liquid, the height of the product layer follows the liquid front.
 
-> The model consists of many sub-models that are general such that developers can swap out different chemical interactions for suitable liquid-solid systems.
-
-The following nondimensionalization is applied to the constitutive model (Fig. 1) for the reactive infiltration process.
+The following nondimensionalization is applied to the constitutive model for the reactive infiltration process.
 \f[
     \begin{equation}
         \begin{aligned}
@@ -33,32 +40,25 @@ The following nondimensionalization is applied to the constitutive model (Fig. 1
         \end{aligned}
     \end{equation}
 \f]
-The complete state of the RVE is therefore denoted by the tuple \f$\left( \alpha_L, \bar{\delta}_P^*, \bar{h}_P \right)\f$, where \f$\bar{\delta}_P^* = \sqrt{\bar{\delta}_P}\f$.
+The complete state of the RVE is denoted by the tuple \f$\left( \alpha_L, \bar{\delta}_P^*, \bar{h}_P \right)\f$, where \f$\bar{\delta}_P^* = \sqrt{\bar{\delta}_P}\f$.
 
-> The use of \f$\bar{\delta}_P^*\f$ is to ensure physical solution for \f$\bar{\delta}_P\f$
-
-The effective porosity can be written in terms of the nondimensional variables as 
+The effective porosity can be written in terms of the nondimensional variables as
 \f[
-    \varphi = \bar{r}_0^2 \left( 1 - \bar{h}_P \right) + \bar{r}_1^2 \left( \bar{h}_P - \bar{h}_L \right).
+    \varphi = \bar{r}_0^2 \left( 1 - \bar{h}_P \right) + \bar{r}_1^2 \left( \bar{h}_P - \bar{h}_L \right), \quad \bar{h}_L = \dfrac{\Omega_L \alpha_L}{\bar{r}_1^2}
 \f]
-where
-\f[
-    \bar{h}_L = \dfrac{\Omega_L \alpha_L}{\bar{r}_1^2}
-\f]
-
-
-Finally, the composition of the solid is:
+and, the amount of solid can be expressed as
 \f[
     \alpha_S = \frac{1}{\Omega_{S}}(1-\varphi - \alpha_P\Omega_P - \alpha_L\Omega_L)
 \f]
 
-### Constraint
+### Constraints
+
 The following constraints apply to the reaction constitutive model:
-- The inlet of the RVE is positive,
+- The liquid flow path remains open, i.e.,
     \f[
-        r_1 \ge 0
+        \bar{r}_1 \ge 0
     \f]
-    When \f$r_1=0\f$ , no liquid can enter the RVE, i.e. \f$\dot{\alpha}_L^I=0\f$. Therefore, the simulation is halted.
+    When \f$\bar{r}_1=0\f$, no liquid can enter the RVE, i.e. \f$\dot{\alpha}_L^I=0\f$. Therefore, the simulation is halted.
 - The reaction stops when there is no carbon remaining in the RVE,
     \f[
         \bar{\delta}_P \le \min\left(\dfrac{1-\sqrt{\varphi_0}}{1-M },\dfrac{\sqrt{\varphi_0}}{M}\right)=\bar{\delta}_P^c.
@@ -73,13 +73,14 @@ The following constraints apply to the reaction constitutive model:
     \f]
     Since \f$\bar{h}_P\f$ is irreversible, \f$\bar{h}_P = 1\f$ corresponds to \f$\bar{\dot{h}}_P = 0\f$, implies
     \f[
-        \dot{\alpha}_L^O = \dot{\alpha}_L^I 
+        \dot{\alpha}_L^O = \dot{\alpha}_L^I
     \f]
     where the injection rate of Liquid \f$\dot{\alpha}_L^I\f$ is prescribed. \f$\dot{\alpha}_L^O\f$ represents the outflow of Liquid
 
 > \f$\dot{\alpha}_L^O = 0\f$ for \f$h_L<1\f$.
 
 ### Governing Equations
+
 When including the constraint, the initial-value problem (IVP) corresponding to the constitutive model is
 
 - The growth of Product thickness in the \f$\pm r\f$ direction (`ProductThicknessGrowthRate` model),
@@ -95,7 +96,7 @@ When including the constraint, the initial-value problem (IVP) corresponding to 
     \f]
     with \f$\{.\}\f$ denotes the Macaulay brackets to ensure \f$\left(\dfrac{\bar{h}_L}{\bar{h}_P}\right)^p\f$ has real values. This is done with `LiquidDeficientPowerScale` model.
 
-    and 
+    and
     \f[
         G = \bar{D} \frac{\rho_L}{\rho_P} \frac{\bar{r}_1} {\bar{\delta}_P\left[\sqrt{\varphi_0}+(1-2M)\bar{\delta}_P\right]}
     \f]
@@ -113,7 +114,7 @@ When including the constraint, the initial-value problem (IVP) corresponding to 
 \f[
      \dot{\alpha}_L = \dot{\alpha}_L^I + \dot{\alpha}_L^R +\dot{\alpha}_L^O
 \f]
-    where 
+    where
 \f[
     \dot{\alpha}_L^R = \dot{\alpha}_S = -\dot{\alpha}_P
 \f]
@@ -126,7 +127,7 @@ A complete example input file for the Liquid Infiltration is shown below with al
 
 ```
 [Tensors]
-    ############### Run condition ############### 
+    ############### Run condition ###############
     [times]
         type = ScalarFromTorchScript
         pytorch_pt_file = 'aLIndot.pt'
@@ -137,7 +138,7 @@ A complete example input file for the Liquid Infiltration is shown below with al
         pytorch_pt_file = 'aLIndot.pt'
         tensor_name = 'data'
     []
-    ############### Simulation parameters ############### 
+    ############### Simulation parameters ###############
     [M]
         type = Scalar
         values = '0.1'
@@ -179,7 +180,7 @@ A complete example input file for the Liquid Infiltration is shown below with al
 
       prescribed_liquid_inlet_rate = 'aLInDot'
       liquid_inlet_rate = 'forces/aLInDot'
-      
+
       show_input_axis = true
       show_output_axis = true
       show_parameters = false
@@ -235,7 +236,7 @@ A complete example input file for the Liquid Infiltration is shown below with al
         condition_b = 'state/hdot'
         fischer_burmeister = 'residual/h'
     []
-    ############### H RESIDUAL ############### 
+    ############### H RESIDUAL ###############
     [residual_h]
         type = ComposedModel
         models = 'fbcond inlet_gap product_growth hdot'
@@ -279,7 +280,7 @@ A complete example input file for the Liquid Infiltration is shown below with al
         current = 'state/alphadot'
         total = 'residual/alpha'
     []
-    ############### ALPHA RESIDUAL ############### 
+    ############### ALPHA RESIDUAL ###############
     [residual_alpha]
         type = ComposedModel
         models = 'product_geo inlet_gap alpha_transition aR_dot alpha_dot mass_balance'
@@ -337,7 +338,7 @@ A complete example input file for the Liquid Infiltration is shown below with al
         switch = 'state/dlimit'
         residual_delta = 'residual/delta'
     []
-    ############### DELTA RESIDUAL ############### 
+    ############### DELTA RESIDUAL ###############
     [residual_delta]
         type = ComposedModel
         models = 'deficient_scale inlet_gap perfect_growth delta_dcrit_ratio delta_limit ddot product_thickness_growth'
@@ -449,8 +450,8 @@ Example input file that defines the Product height growth with Liquid front.
 Model object: `FischerBurmeister`
 
 If \f$ a \ge 0, b \ge 0, ab = 0 \f$ then Fischer-Burmeister complementary condition is
- \f[ 
-    a+b-\sqrt{a^2+b^2} = 0 
+ \f[
+    a+b-\sqrt{a^2+b^2} = 0
 \f]
 
 > For use in liquid infiltration, condition_a is `ProductGrowthWithLiquid` and condition_b is `VariableRate` of a state variable corresponding to Product's height. The output of the model is one of the residual for the IVP.
@@ -506,7 +507,7 @@ Product grows due to the diffusion between the Liquid-Product interface and Prod
 
 where \f$C\f$ is the mass concentration, \f$\boldsymbol{n}\f$ is the normal vector. Assuming Liquid reacts immediately with Solid at the Product-Solid interface, i.e. the concentration of Liquid (with molar mass \f$M_L\f$) at the Product-Solid interface is zero, then
 \f[
-    \dot{m}_P = 2D \pi r_1 h_P \frac{\rho_L}{\delta_P} 
+    \dot{m}_P = 2D \pi r_1 h_P \frac{\rho_L}{\delta_P}
 \f]
 Combining, the Product thickness height growth, in abundance of Liquid, is
 \f[
@@ -561,12 +562,12 @@ Example input file that defines the power scale reduction scaling for Product th
 ### Effective Product thickness growth
 Model object: `ProductThicknessGrowthRate`
 
-The total effective combination of the product thickness growth rate, combining the `ideal_thickness_growth` (\f$R\f$) with `scale`(\f$S\f$) to account for liquid deficiency and `switch`(\f$H\f$) to limit the growth rate by a critical value.
+The total effective combination of the product thickness growth rate, combining the `ideal_thickness_growth` (\f$R\f$) with `scale`\f$(S)\f$ to account for liquid deficiency and `switch`(\f$H\f$) to limit the growth rate by a critical value.
 \f[
     {\dot{\bar{\delta}}_P^*} - R S H = 0
 \f]
 
-> The output of the model is one of the residual for the IVP. To use for liquid infiltration, make sure to have `switch` as an appropriate `ComposedModel` between `ProductThicknessLimit` and `SwitchingFunction`. Refer to the Complete Input File under Framework section for example. 
+> The output of the model is one of the residual for the IVP. To use for liquid infiltration, make sure to have `switch` as an appropriate `ComposedModel` between `ProductThicknessLimit` and `SwitchingFunction`. Refer to the Complete Input File under Framework section for example.
 
 Example input file that defines effective Product thickness growth.
 ```
@@ -615,12 +616,12 @@ When \f$\bar{h}_P < 1\f$, \f$\dot{\alpha}_L^O = 0\f$. Therefore,
 \f[
     \dot{\alpha}_L - S \dot{\alpha}_L^I + (-\dot{\alpha}_L^R) = 0
 \f]
-with `switch` (\f$S\f$) can be written from Heaviside function as
+with `switch` \f$(S)\f$ can be written from Heaviside function as
 \f[
     S = 1 - H\left( \bar{h}_P -1 \right)
-\f] 
+\f]
 
-> The output of the model is one of the residual for the IVP. To use for liquid infiltration, use `SwitchingFunction` model with appropriate input for `switch` (\f$S\f$). Refer to the Complete Input File under Framework section for example. 
+> The output of the model is one of the residual for the IVP. To use for liquid infiltration, use `SwitchingFunction` model with appropriate input for `switch` \f$(S)\f$. Refer to the Complete Input File under Framework section for example.
 
 Example input file that defines the Liquid total mass balance.
 ```
