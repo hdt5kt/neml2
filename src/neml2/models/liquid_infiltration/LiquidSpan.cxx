@@ -33,7 +33,7 @@ LiquidSpan::expected_options()
 {
   OptionSet options = Model::expected_options();
 
-  options.doc() = "";
+  options.doc() = "The span of the liquid for the liquid infiltraion model";
 
   options.set_parameter<CrossRef<Scalar>>("liquid_molar_volume");
   options.set("liquid_molar_volume").doc() =
