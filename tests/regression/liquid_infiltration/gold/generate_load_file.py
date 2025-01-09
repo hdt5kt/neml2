@@ -40,6 +40,8 @@ in_out = 108000 * 10
 def aSi_in_evolution_rate(t):
     if t <= 108000:
         a_si_in = 3e4 / 108000
+    elif t <= 108000 * 2:
+        a_si_in = 3e3 / 108000
     else:
         a_si_in = 0.0
     return a_si_in

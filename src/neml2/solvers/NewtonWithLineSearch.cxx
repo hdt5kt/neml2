@@ -133,7 +133,7 @@ NewtonWithLineSearch::linesearch(NonlinearSystem & system,
 
   if (flag)
     neml_assert(check,
-                "NOnlinear Solver failed to converge: Line Search produces negative stopping "
+                "Nonlinear Solver failed to converge: Line Search produces negative stopping "
                 "criteria, try with other "
                 "linesearch_type, increase linesearch_cutback "
                 "or reduce linesearch_stopping_criteria");

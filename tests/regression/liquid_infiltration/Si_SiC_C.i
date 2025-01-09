@@ -90,19 +90,24 @@ nbatch = '(5)'
         product_thickness = 'state/delta'
         inlet_gap = 'state/r1'
     []
-    [product_growth]
-        type = ProductGrowthWithLiquid
-        liquid_molar_volume = 'omega_L'
-        product_height = 'state/h'
-        inlet_gap = 'state/r1'
-        liquid_saturation = 'state/alpha'
-        phi_condition = 'state/pcond'
-    []
     [hdot]
         type = ScalarVariableRate
         variable = 'state/h'
         time = 'forces/tt'
         rate = 'state/hdot'
+    []
+    [hL]
+        type = LiquidSpan
+        liquid_molar_volume = 0.00001256
+        inlet_gap = 'state/r1'
+        liquid_saturation = 'state/alpha'
+        liquid_span = 'state/hL'
+    []
+    [pcond]
+        type = ScalarLinearCombination
+        coefficients = "1.0 -1.0"
+        from_var = 'state/h state/hL'
+        to_var = 'state/pcond'
     []
     [fbcond]
         type = FischerBurmeister
@@ -113,26 +118,26 @@ nbatch = '(5)'
     ############### H RESIDUAL ############### 
     [residual_h]
         type = ComposedModel
-        models = 'fbcond inlet_gap product_growth hdot'
+        models = 'fbcond inlet_gap hL pcond hdot'
     []
     #############################################
     [product_geo]
-        type = ProductGeometricRelation
+        type = ProductSaturation
         product_molar_volume = 'omega_P'
-        product_height = 'state/h'
+        product_span = 'state/h'
         inlet_gap = 'state/r1'
         product_thickness = 'state/delta'
         product_saturation = 'state/alphaP'
     []
     [alpha_transition]
         type = SwitchingFunction
-        smooth_degree = 100.0
+        smoothness = 100.0
         smooth_type = 'SIGMOID'
         scale = 1.0
         offset = 1.0
-        one_subtract_condition = true
-        variable = 'state/h'
-        switch_out = 'state/alpha_transition'
+        complement_condition = true
+        variable = 'state/hL'
+        out = 'state/alpha_transition'
     []
     [aR_dot]
         type = ScalarVariableRate
@@ -147,30 +152,29 @@ nbatch = '(5)'
         rate = 'state/alphadot'
     []
     [mass_balance]
-        type = ChemMassBalance
+        type = LIMassBalance
         in = 'forces/aLInDot'
         switch = 'state/alpha_transition'
         minus_reaction = 'state/aRdot'
+        stoichiometric_coefficient = 1.0
         current = 'state/alphadot'
         total = 'residual/alpha'
     []
     ############### ALPHA RESIDUAL ############### 
     [residual_alpha]
         type = ComposedModel
-        models = 'product_geo inlet_gap alpha_transition aR_dot alpha_dot mass_balance'
+        models = 'product_geo inlet_gap alpha_transition aR_dot alpha_dot mass_balance hL'
     []
     #############################################
     [deficient_scale]
-        type = LiquidDeficientPowerScale
-        liquid_molar_volume = 'omega_L'
-        power = 'p'
-        product_height = 'state/h'
-        inlet_gap = 'state/r1'
-        liquid_saturation = 'state/alpha'
+        type = PowerLawLiquidDeficiency
+        product_span = 'state/h'
+        liquid_span = 'state/hL'
+        exponent = 'p'
         scale = 'state/def_scale'
     []
     [perfect_growth]
-        type = LiquidProductDiffusion1D
+        type = DiffusionalProductThicknessGrowth
         liquid_product_density_ratio = 0.8
         initial_porosity = 'phi0'
         product_thickness_growth_ratio = 'M'
@@ -182,7 +186,7 @@ nbatch = '(5)'
         ideal_thickness_growth = 'state/delta_growth'
     []
     [delta_dcrit_ratio]
-        type = ProductThicknessLimit
+        type = ProductThicknessLimitRatio
         initial_porosity = 'phi0'
         product_thickness_growth_ratio = 'M'
         product_thickness = 'state/delta'
@@ -190,13 +194,13 @@ nbatch = '(5)'
     []
     [delta_limit]
         type = SwitchingFunction
-        smooth_degree = 100.0
+        smoothness = 100.0
         smooth_type = 'SIGMOID'
         scale = 1.0
         offset = 1.0
-        one_subtract_condition = true
+        complement_condition = true
         variable = 'state/dratio'
-        switch_out = 'state/dlimit'
+        out = 'state/dlimit'
     []
     [ddot]
         type = ScalarVariableRate
@@ -215,7 +219,7 @@ nbatch = '(5)'
     ############### DELTA RESIDUAL ############### 
     [residual_delta]
         type = ComposedModel
-        models = 'deficient_scale inlet_gap perfect_growth delta_dcrit_ratio delta_limit ddot product_thickness_growth'
+        models = 'deficient_scale inlet_gap perfect_growth delta_dcrit_ratio delta_limit ddot product_thickness_growth hL'
     []
     #############################################
     [model_residual]
@@ -229,9 +233,9 @@ nbatch = '(5)'
         solver = 'newton'
     []
     [aSiC_new]
-        type = ProductGeometricRelation
+        type = ProductSaturation
         product_molar_volume = 'omega_P'
-        product_height = 'state/h'
+        product_span = 'state/h'
         inlet_gap = 'state/r1'
         product_thickness = 'state/delta'
         product_saturation = 'state/alphaP'
