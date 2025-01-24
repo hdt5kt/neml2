@@ -37,6 +37,10 @@ ProductThicknessGrowthRate::expected_options()
   options.set_input("thickness_rate") = VariableName("state", "ddot");
   options.set("thickness_rate").doc() = "Product's thickness growth rate from the reaction";
 
+  options.set<bool>("scaling_condition") = true;
+  options.set("scaling_condition").doc() = "Whether to apply scaling condition for the product's "
+                                           "thickness growth rate when liquid is defficient.";
+
   options.set_input("scale") = VariableName("state", "scale");
   options.set("scale").doc() =
       "Scaling relations for product's thickness growth when the infiltrated liquid's "
@@ -63,6 +67,7 @@ ProductThicknessGrowthRate::ProductThicknessGrowthRate(const OptionSet & options
     _scale(declare_input_variable<Scalar>("scale")),
     _rate(declare_input_variable<Scalar>("ideal_thickness_growth")),
     _smooth(declare_input_variable<Scalar>("switch")),
+    _scale_cond(options.get<bool>("scaling_condition")),
     _rdelta(declare_output_variable<Scalar>("residual_delta"))
 {
 }
@@ -74,15 +79,27 @@ ProductThicknessGrowthRate::set_value(bool out, bool dout_din, bool d2out_din2)
 
   if (out)
   {
-    _rdelta = _ddot - _scale * _rate * _smooth;
+    if (_scale_cond)
+      _rdelta = _ddot - _scale * _rate * _smooth;
+    else
+      _rdelta = _ddot - _rate * _smooth;
   }
 
   if (dout_din)
   {
     _rdelta.d(_ddot) = neml2::Scalar::full(1.0);
-    _rdelta.d(_scale) = -_rate * _smooth;
-    _rdelta.d(_rate) = -_scale * _smooth;
-    _rdelta.d(_smooth) = -_scale * _rate;
+    if (_scale_cond)
+    {
+      _rdelta.d(_scale) = -_rate * _smooth;
+      _rdelta.d(_rate) = -_scale * _smooth;
+      _rdelta.d(_smooth) = -_scale * _rate;
+    }
+    else
+    {
+      _rdelta.d(_rate) = -_smooth;
+      _rdelta.d(_smooth) = -_rate;
+      _rdelta.d(_scale) = neml2::Scalar::full(0.0);
+    }
   }
 }
 }

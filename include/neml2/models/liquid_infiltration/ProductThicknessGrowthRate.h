@@ -47,6 +47,7 @@ protected:
   const Variable<Scalar> & _scale;
   const Variable<Scalar> & _rate;
   const Variable<Scalar> & _smooth;
+  const bool _scale_cond;
 
   // Residual Variables
   Variable<Scalar> & _rdelta;

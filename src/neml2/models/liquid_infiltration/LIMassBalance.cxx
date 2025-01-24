@@ -76,6 +76,11 @@ LIMassBalance::set_value(bool out, bool dout_din, bool d2out_din2)
   if (out)
   {
     _total = _current - _switch * _in + _mu * _mreact;
+
+    // std::cout << "_current = " << _current.value().item<Real>() << std::endl;
+    // std::cout << "_switch = " << _switch.value().item<Real>() << std::endl;
+    // std::cout << "_in = " << _in.value().item<Real>() << std::endl;
+    // std::cout << "_mreact = " << _mreact.value().item<Real>() << std::endl;
   }
 
   if (dout_din)
@@ -84,8 +89,7 @@ LIMassBalance::set_value(bool out, bool dout_din, bool d2out_din2)
     _total.d(_mreact) = _mu;
     _total.d(_current) = neml2::Scalar::full(1.0);
 
-    if (_in.is_dependent())
-      _total.d(_in) = -_switch;
+    _total.d(_in) = -_switch;
 
     if (currently_solving_nonlinear_system())
       return;

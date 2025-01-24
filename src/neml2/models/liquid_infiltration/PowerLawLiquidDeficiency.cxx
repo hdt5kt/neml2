@@ -76,8 +76,8 @@ PowerLawLiquidDeficiency::set_value(bool out, bool dout_din, bool d2out_din2)
   {
     _scale.d(_hP) =
         -(_p * math::pow(math::macaulay(_hL * neml2::Scalar::full(1.0)) / _hP, _p)) / _hP;
-    _scale.d(_hL) =
-        (_p * math::pow(math::macaulay(_hL * neml2::Scalar::full(1.0)) / _hP, _p)) / _hL;
+    _scale.d(_hL) = (_p * math::pow(math::macaulay(_hL * neml2::Scalar::full(1.0)) / _hP, _p)) /
+                    (_hL + machine_precision());
   }
 }
 }

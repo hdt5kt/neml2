@@ -44,6 +44,9 @@ ProductSaturation::expected_options()
   options.set_input("product_span") = VariableName("state", "h");
   options.set("product_span").doc() = "Span of the product.";
 
+  options.set<bool>("maximum_span_condition") = false;
+  options.set("maximum_span_condition").doc() = "Whether to set the maximum span to 1";
+
   options.set_input("product_thickness") = VariableName("state", "delta");
   options.set("product_thickness").doc() = "Thickness of the product.";
 
@@ -60,6 +63,7 @@ ProductSaturation::ProductSaturation(const OptionSet & options)
     _r1(declare_input_variable<Scalar>("inlet_gap")),
     _sqrtd(declare_input_variable<Scalar>("product_thickness")),
     _h(declare_input_variable<Scalar>("product_span")),
+    _maxh(options.get<bool>("maximum_span_condition")),
     _alphaP(declare_output_variable<Scalar>("product_saturation"))
 {
 }
@@ -69,9 +73,14 @@ ProductSaturation::set_value(bool out, bool dout_din, bool d2out_din2)
 {
   neml_assert_dbg(!d2out_din2, "Second derivative not implemented.");
 
+  auto h = _h * neml2::Scalar::full(1.0);
+
+  if (_maxh)
+    h = neml2::Scalar::full(1.0);
+
   if (out)
   {
-    _alphaP = _h / _oP * (2.0 * _r1 * _sqrtd * _sqrtd + _sqrtd * _sqrtd * _sqrtd * _sqrtd);
+    _alphaP = h / _oP * (2.0 * _r1 * _sqrtd * _sqrtd + _sqrtd * _sqrtd * _sqrtd * _sqrtd);
   }
 
   if (dout_din)
@@ -79,11 +88,15 @@ ProductSaturation::set_value(bool out, bool dout_din, bool d2out_din2)
     const auto * const oP = nl_param("oP");
     if (oP)
       _alphaP.d(*oP) =
-          -_h / (_oP * _oP) * (2.0 * _r1 * _sqrtd * _sqrtd + _sqrtd * _sqrtd * _sqrtd * _sqrtd);
+          -h / (_oP * _oP) * (2.0 * _r1 * _sqrtd * _sqrtd + _sqrtd * _sqrtd * _sqrtd * _sqrtd);
 
-    _alphaP.d(_r1) = 2.0 * _h * _sqrtd * _sqrtd / _oP;
-    _alphaP.d(_h) = (2.0 * _r1 * _sqrtd * _sqrtd + _sqrtd * _sqrtd * _sqrtd * _sqrtd) / _oP;
-    _alphaP.d(_sqrtd) = (4 * _sqrtd * _h * (_sqrtd * _sqrtd + _r1)) / _oP;
+    _alphaP.d(_r1) = 2.0 * h * _sqrtd * _sqrtd / _oP;
+    _alphaP.d(_sqrtd) = (4 * _sqrtd * h * (_sqrtd * _sqrtd + _r1)) / _oP;
+
+    if (_maxh)
+      _alphaP.d(_h) = neml2::Scalar::full(0.0);
+    else
+      _alphaP.d(_h) = (2.0 * _r1 * _sqrtd * _sqrtd + _sqrtd * _sqrtd * _sqrtd * _sqrtd) / _oP;
   }
 }
 }

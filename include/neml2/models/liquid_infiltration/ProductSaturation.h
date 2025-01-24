@@ -48,6 +48,7 @@ protected:
   const Variable<Scalar> & _r1;
   const Variable<Scalar> & _sqrtd;
   const Variable<Scalar> & _h;
+  const bool _maxh;
 
   // Residual Variables
   Variable<Scalar> & _alphaP;
