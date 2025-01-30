@@ -300,9 +300,18 @@ pow(const T & a, const Real & n)
   return T(torch::pow(a, n), a.batch_sizes());
 }
 
+template <class T, typename = typename std::enable_if_t<std::is_base_of_v<TensorBase<T>, T>>>
+T
+sigmoid(const T & a, const Real & n)
+{
+  return T(1.0 / 2.0 * (1.0 + tanh(n * a)));
+}
+
 Tensor pow(const Real & a, const Tensor & n);
 
 Tensor pow(const Tensor & a, const Tensor & n);
+
+Tensor sigmoid(const Tensor & a, const Tensor & n);
 
 template <class T, typename = typename std::enable_if_t<std::is_base_of_v<TensorBase<T>, T>>>
 T
@@ -352,6 +361,13 @@ where(const torch::Tensor & condition, const T & a, const T & b)
 {
   neml_assert_broadcastable_dbg(a, b);
   return T(torch::where(condition, a, b), broadcast_batch_dim(a, b));
+}
+
+template <class T, typename = typename std::enable_if_t<std::is_base_of_v<TensorBase<T>, T>>>
+T
+clamp(const T & x, Real lb, Real ub)
+{
+  return T(torch::clamp(x, lb, ub), x.batch_sizes());
 }
 
 /**

@@ -22,55 +22,29 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "neml2/tensors/Scalar.h"
-#include "neml2/misc/math.h"
+#include "neml2/tensors/user_tensors/PrimitiveTensorFromTorchScript.h"
+#include "neml2/tensors/tensors.h"
 
 namespace neml2
 {
+#define REGISTER_PRIMITIVETENSORFROMTORCHSCRIPT(T)                                                 \
+  using T##FromTorchScript = PrimitiveTensorFromTorchScript<T>;                                    \
+  register_NEML2_object(T##FromTorchScript)
+FOR_ALL_PRIMITIVETENSOR(REGISTER_PRIMITIVETENSORFROMTORCHSCRIPT);
+#undef REGISTER_PRIMITIVETENSORFROMTORCHSCRIPT
 
-Scalar::Scalar(Real init, const torch::TensorOptions & options)
-  : Scalar(Scalar::full(init, options))
+template <typename T>
+OptionSet
+PrimitiveTensorFromTorchScript<T>::expected_options()
 {
+  OptionSet options = FromTorchScript::expected_options();
+  return options;
 }
 
-Scalar
-Scalar::identity_map(const torch::TensorOptions & options)
+template <typename T>
+PrimitiveTensorFromTorchScript<T>::PrimitiveTensorFromTorchScript(const OptionSet & options)
+  : FromTorchScript(options),
+    T(load_torch_tensor(options))
 {
-  return Scalar::ones(options);
 }
-
-namespace math
-{
-Scalar
-minimum(const Scalar & a, const Scalar & b)
-{
-  neml_assert_batch_broadcastable_dbg(a, b);
-  indexing::TensorIndices net{torch::indexing::Ellipsis};
-  net.insert(net.end(), a.base_dim(), torch::indexing::None);
-  return Scalar(torch::minimum(a, b.index(net)), broadcast_batch_dim(a, b));
-}
-}
-
-Scalar
-operator*(const Scalar & a, const Scalar & b)
-{
-  neml_assert_batch_broadcastable_dbg(a, b);
-  return torch::operator*(a, b);
-}
-
-Scalar
-abs(const Scalar & a)
-{
-  return Scalar(torch::abs(a), a.batch_sizes());
-}
-
-namespace math
-{
-// Scalar
-// sigmoid(const Scalar & a, const Scalar & n)
-//{
-//   neml_assert_broadcastable_dbg(a, n);
-//   return 1.0 / 2.0 * (1.0 + math::tanh(n * a));
-// }
-} // namespace math
 } // namespace neml2

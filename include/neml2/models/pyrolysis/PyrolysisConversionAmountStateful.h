@@ -22,55 +22,33 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "neml2/tensors/Scalar.h"
-#include "neml2/misc/math.h"
+#pragma once
+
+#include "neml2/models/Model.h"
 
 namespace neml2
 {
+/**
+ * @brief Calculate the pyrolysis conversion amount with initial condition as state parameters.
+ */
+class PyrolysisConversionAmountStateful : public Model
+{
+public:
+  static OptionSet expected_options();
 
-Scalar::Scalar(Real init, const torch::TensorOptions & options)
-  : Scalar(Scalar::full(init, options))
-{
-}
+  PyrolysisConversionAmountStateful(const OptionSet & options);
 
-Scalar
-Scalar::identity_map(const torch::TensorOptions & options)
-{
-  return Scalar::ones(options);
-}
+protected:
+  void set_value(bool out, bool dout_din, bool d2out_din2) override;
 
-namespace math
-{
-Scalar
-minimum(const Scalar & a, const Scalar & b)
-{
-  neml_assert_batch_broadcastable_dbg(a, b);
-  indexing::TensorIndices net{torch::indexing::Ellipsis};
-  net.insert(net.end(), a.base_dim(), torch::indexing::None);
-  return Scalar(torch::minimum(a, b.index(net)), broadcast_batch_dim(a, b));
-}
-}
+  const Variable<Scalar> & _ms0;
+  const Variable<Scalar> & _mb0;
+  const Scalar & _Y;
 
-Scalar
-operator*(const Scalar & a, const Scalar & b)
-{
-  neml_assert_batch_broadcastable_dbg(a, b);
-  return torch::operator*(a, b);
-}
+  // State Variables
+  const Variable<Scalar> & _ms;
 
-Scalar
-abs(const Scalar & a)
-{
-  return Scalar(torch::abs(a), a.batch_sizes());
+  // Residual Variables
+  Variable<Scalar> & _a;
+};
 }
-
-namespace math
-{
-// Scalar
-// sigmoid(const Scalar & a, const Scalar & n)
-//{
-//   neml_assert_broadcastable_dbg(a, n);
-//   return 1.0 / 2.0 * (1.0 + math::tanh(n * a));
-// }
-} // namespace math
-} // namespace neml2

@@ -22,55 +22,52 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "neml2/tensors/Scalar.h"
+#include "neml2/models/Ratio.h"
 #include "neml2/misc/math.h"
 
 namespace neml2
 {
+register_NEML2_object(Ratio);
+OptionSet
+Ratio::expected_options()
+{
+  OptionSet options = Model::expected_options();
+  options.doc() = "Define the ratio between two variables";
 
-Scalar::Scalar(Real init, const torch::TensorOptions & options)
-  : Scalar(Scalar::full(init, options))
+  options.set_input("numerator") = VariableName("state", "numerator");
+  options.set("numerator").doc() = "Numerator variable";
+
+  options.set_input("denominator") = VariableName("state", "denominator");
+  options.set("denominator").doc() = "Denominator variable";
+
+  options.set_output("out") = VariableName("state", "out");
+  options.set("out").doc() = "Ratio out.";
+
+  return options;
+}
+
+Ratio::Ratio(const OptionSet & options)
+  : Model(options),
+    _a(declare_input_variable<Scalar>("numerator")),
+    _b(declare_input_variable<Scalar>("denominator")),
+    _aob(declare_output_variable<Scalar>("out"))
 {
 }
 
-Scalar
-Scalar::identity_map(const torch::TensorOptions & options)
+void
+Ratio::set_value(bool out, bool dout_din, bool d2out_din2)
 {
-  return Scalar::ones(options);
-}
+  neml_assert_dbg(!d2out_din2, "Second derivative not implemented.");
 
-namespace math
-{
-Scalar
-minimum(const Scalar & a, const Scalar & b)
-{
-  neml_assert_batch_broadcastable_dbg(a, b);
-  indexing::TensorIndices net{torch::indexing::Ellipsis};
-  net.insert(net.end(), a.base_dim(), torch::indexing::None);
-  return Scalar(torch::minimum(a, b.index(net)), broadcast_batch_dim(a, b));
-}
-}
+  if (out)
+  {
+    _aob = _a / _b;
+  }
 
-Scalar
-operator*(const Scalar & a, const Scalar & b)
-{
-  neml_assert_batch_broadcastable_dbg(a, b);
-  return torch::operator*(a, b);
+  if (dout_din)
+  {
+    _aob.d(_a) = 1 / _b;
+    _aob.d(_b) = -1 * _a / (_b * _b);
+  }
 }
-
-Scalar
-abs(const Scalar & a)
-{
-  return Scalar(torch::abs(a), a.batch_sizes());
 }
-
-namespace math
-{
-// Scalar
-// sigmoid(const Scalar & a, const Scalar & n)
-//{
-//   neml_assert_broadcastable_dbg(a, n);
-//   return 1.0 / 2.0 * (1.0 + math::tanh(n * a));
-// }
-} // namespace math
-} // namespace neml2

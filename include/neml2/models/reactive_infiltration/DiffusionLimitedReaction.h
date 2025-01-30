@@ -22,55 +22,42 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "neml2/tensors/Scalar.h"
-#include "neml2/misc/math.h"
+#pragma once
+
+#include "neml2/models/Model.h"
 
 namespace neml2
 {
+class DiffusionLimitedReaction : public Model
+{
+public:
+  static OptionSet expected_options();
 
-Scalar::Scalar(Real init, const torch::TensorOptions & options)
-  : Scalar(Scalar::full(init, options))
-{
-}
+  DiffusionLimitedReaction(const OptionSet & options);
 
-Scalar
-Scalar::identity_map(const torch::TensorOptions & options)
-{
-  return Scalar::ones(options);
-}
+protected:
+  void set_value(bool out, bool dout_din, bool d2out_din2) override;
 
-namespace math
-{
-Scalar
-minimum(const Scalar & a, const Scalar & b)
-{
-  neml_assert_batch_broadcastable_dbg(a, b);
-  indexing::TensorIndices net{torch::indexing::Ellipsis};
-  net.insert(net.end(), a.base_dim(), torch::indexing::None);
-  return Scalar(torch::minimum(a, b.index(net)), broadcast_batch_dim(a, b));
-}
-}
+  /// Dimensionless inner radius of the product phase
+  const Variable<Scalar> & _ri;
 
-Scalar
-operator*(const Scalar & a, const Scalar & b)
-{
-  neml_assert_batch_broadcastable_dbg(a, b);
-  return torch::operator*(a, b);
-}
+  /// Dimensionless outer radius of the product phase
+  const Variable<Scalar> & _ro;
 
-Scalar
-abs(const Scalar & a)
-{
-  return Scalar(torch::abs(a), a.batch_sizes());
-}
+  /// Dummy thickness of the product phase to prevent singularity
+  const Real _delta;
 
-namespace math
-{
-// Scalar
-// sigmoid(const Scalar & a, const Scalar & n)
-//{
-//   neml_assert_broadcastable_dbg(a, n);
-//   return 1.0 / 2.0 * (1.0 + math::tanh(n * a));
-// }
-} // namespace math
+  /// Reactivity
+  const Variable<Scalar> & _R_l;
+  const Variable<Scalar> & _R_s;
+
+  /// Reaction rate
+  Variable<Scalar> & _rate;
+
+  /// Characteristic diffusion coefficient
+  const Scalar & _D;
+
+  /// Molar volume of the rate-limiting species
+  const Real _omega;
+};
 } // namespace neml2
