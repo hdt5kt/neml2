@@ -86,6 +86,7 @@ from .InputParameter import (
     WR2InputParameter,
 )
 from .IntermediateDiff import SR2IntermediateDiff
+from .IntermediateLinearContraction import IntermediateLinearContraction
 from .IntermediateMean import SR2IntermediateMean
 from .IntermediateSum import SR2IntermediateSum
 from .Interpolation import Interpolation
@@ -203,6 +204,7 @@ __all__ = [
     "SR2DynamicMean",
     "SR2DynamicSum",
     "SR2IntermediateDiff",
+    "IntermediateLinearContraction",
     "Interpolation",
     "Reduction",
     "SR2IntermediateMean",
