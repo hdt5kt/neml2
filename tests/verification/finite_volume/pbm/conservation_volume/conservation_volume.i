@@ -2,12 +2,12 @@
 # both total mass (sum u_i dv_i) and total volume (sum u_i/rho_i dv_i). Mass is
 # conserved by the flux form for any p; volume needs a p designed for it. Density
 # is non-monotone (light sink bin 0, heavy sink bin 1) so a non-trivial
-# volume-conserving p exists. Bins 0,1 are stable sinks (gamma=0); coarser bins
+# volume conserving p exists. Bins 0,1 are stable sinks (gamma=0); coarser bins
 # fragment only into them with p[0,j]=0.6 v_j, p[1,j]=0.2 v_j, the unique
 # solution (dv=1) of
 #   mass:   sum_k rho_k v_k p[k,j] = rho_j v_j
 #   volume: sum_k v_k p[k,j] (1 - rho_k/rho_j) = 0
-# The [Verification] block checks only the step-0 round-trip; the invariants are
+# The [Verification] block checks only the step-0 round trip; the invariants are
 # asserted across the trajectory by the companion test_conservation_volume.py.
 [Tensors]
   [rho_val]
