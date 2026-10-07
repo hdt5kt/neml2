@@ -109,6 +109,62 @@ The final `model_with_stress` composes the implicit update with the elasticity m
 If you need to *post-process* an orientation (e.g. wrap the modified-Rodrigues parameters back into the fundamental zone before writing output), append a [](models-FixOrientation) model to the chain.
 :::
 
+## Latent (slip-system interaction) hardening
+
+[](models-DislocationInteractionStrengthMap) generalizes [](models-DislocationObstacleStrengthMap) with a slip-system **interaction matrix** $h$, so the forest density seen by system $i$ is a weighted sum over all systems,
+
+$$
+\tau_i = \tau_0 + \alpha \mu b \sqrt{\sum_r h_{ir}\,\rho_r},
+$$
+
+i.e. dislocations on system $r$ obstruct system $i$ through $h_{ir}$. With $h = I$ it reduces exactly to the diagonal self-hardening map. The forest sum must stay non-negative for every system (the square root is real only then): this holds for $\rho \ge 0$ and a non-negative $h$, so a calibrated $h$ must be constrained accordingly.
+
+The matrix is an ordinary $n_\text{slip}\times n_\text{slip}$ material parameter — there are two ways to supply it, and the model accepts either:
+
+1. **Give the whole matrix** — a `SquareMatrix` `[Tensors]` object with `fill = dense` (or any explicit tensor).
+2. **Build it from a handful of physical coefficients** — the Franciosi picture (self / coplanar / collinear / glissile / Hirth / Lomer). `SquareMatrix` with `fill = block` maps one coefficient per slip-family pair onto the full matrix via a `blocks` partition, so a 24-system, two-family lattice with self-coefficient `1.0` and latent-coefficient `0.4` is just
+
+   ```ini
+   [Tensors]
+     [h]
+       type = SquareMatrix
+       fill = block        # one coefficient per (family, family) pair
+       blocks = '12 12'    # the slip-family partition (m = sum(blocks) = 24)
+       data = '1.0 0.4 0.4 1.0'
+     []
+   []
+   ```
+
+   `fill = diagonal_blocks` instead gives a block-constant *diagonal* (distinct self-hardening per family, no latent coupling): `data = '1.0 0.8'`, `blocks = '12 12'`.
+
+`SquareMatrix` is geometry-agnostic (it never reads the lattice). The `blocks` partition and the slip-system ordering — which physical system is index $i$, and hence which entry of $h$ couples which pair — are the user's responsibility and must follow the ordering of the [](data-CubicCrystal) the matrix is paired with.
+
+The same interaction matrix drives two **linear** interaction-hardening forms as well, for when the √-forest nonlinearity is not wanted:
+
+- [](models-LinearInteractionStrengthMap) — a strength map $\tau_i = \tau_{0,i} + \sum_j h_{ij}\,\phi_j$ from a per-slip hardening state $\phi$ (e.g. accumulated slip). The coupling Jacobian $h_{ij}$ is constant.
+- [](models-LinearInteractionHardeningRule) — an evolution rule $\dot{h}_i = \sum_j M_{ij}\,\lvert\dot{\gamma}_j\rvert$ that puts the interaction in the hardening *rate*; the strength is then the trivial per-slip sum $\tau_i = \tau_{0,i} + h_i$, composed from existing primitives. The $\lvert\cdot\rvert$ accumulates hardening regardless of slip direction.
+
+All three (√-forest, linear-map, linear-rate) take the interaction matrix as an ordinary promotable parameter, so `SquareMatrix` builds it identically for any of them.
+
+**Wiring it in.** The strength map replaces the diagonal [](models-DislocationObstacleStrengthMap) in the slip-kinetics chain — it reads the per-slip state and the matrix `h` and emits the per-system `slip_strengths` that [](models-PowerLawSlipRule) consumes:
+
+```ini
+[Models]
+  [slip_strength]
+    type = DislocationInteractionStrengthMap
+    dislocation_density = 'dislocation_density'   # per-slip state (n_slip)
+    interaction_matrix = 'h'                      # the SquareMatrix above
+    constant_strength = 50.0
+    alpha = 0.3
+    mu = 1.0e5
+    b = 2.54e-4
+    slip_strengths = 'slip_strengths'
+  []
+[]
+```
+
+For the linear strength-map form, swap `type = LinearInteractionStrengthMap` and read the per-slip hardening state (`slip_hardening = '...'`, `interaction_matrix = 'h'`, `constant_strength = ...`); for the rate form, use [](models-LinearInteractionHardeningRule) in the evolution (`slip_rates = '...'`, `interaction_matrix = 'h'`) and integrate its `slip_hardening_rate`. Every per-slip strength/rate here carries the slip-system axis as a sub-batch, so the solve folds `grain × slip` automatically.
+
 ## Worked examples
 
 End-to-end notebooks that drive a single-crystal model through a rolling

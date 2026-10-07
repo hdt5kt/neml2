@@ -130,3 +130,45 @@ def test_dense_pushforward_matches_autograd():
     d_coeff = _ALPHA * _MU * _B * 0.5 / torch.sqrt(forest)
     jac_formula = d_coeff.unsqueeze(-1) * h  # d tau_i / d rho_r = d_coeff_i * h_ir
     torch.testing.assert_close(jac_autograd, jac_formula, rtol=0, atol=1e-10)
+
+
+def _model_with_raw_matrix(expr: str):
+    """Build the interaction map with an arbitrary interaction_matrix tensor expr."""
+    txt = f"""
+    [Tensors]
+      [hmat]
+        type = Python
+        expr = '{expr}'
+      []
+    []
+    [Models]
+      [model]
+        type = DislocationInteractionStrengthMap
+        dislocation_density = 'dislocation_density'
+        interaction_matrix = 'hmat'
+        constant_strength = {_TAU0}
+        alpha = {_ALPHA}
+        mu = {_MU}
+        b = {_B}
+      []
+    []
+    """
+    return load_string(txt).get_model("model")
+
+
+def test_non_square_matrix_raises():
+    """A non-square interaction_matrix gives a clear 'must be square' error."""
+    model = _model_with_raw_matrix(
+        "Scalar(torch.ones(3, 4, dtype=torch.float64)).sub_batch.retag(2)"
+    )
+    rho = Scalar(torch.ones(4, dtype=torch.float64), 1).with_sub_batch_ndim(1)
+    with pytest.raises(ValueError, match="must be square"):
+        model.call_by_name({"dislocation_density": rho})
+
+
+def test_matrix_slip_count_mismatch_raises():
+    """A square matrix whose size != dislocation_density slip count errors clearly."""
+    model = _model_with_raw_matrix("Scalar(torch.eye(3, dtype=torch.float64)).sub_batch.retag(2)")
+    rho = Scalar(torch.ones(4, dtype=torch.float64), 1).with_sub_batch_ndim(1)
+    with pytest.raises(ValueError, match="does not match"):
+        model.call_by_name({"dislocation_density": rho})
