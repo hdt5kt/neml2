@@ -36,6 +36,7 @@ factory registry via ``@register_neml2_object``. The native ``regression/conftes
 imports it so the registrations fire before pytest collects the input files.
 """
 
+from . import CommonToExtraOffset as _common_to_extra_offset  # noqa: F401
 from . import DenseSubBatchMixing as _dense_sub_batch_mixing  # noqa: F401
 from . import SurrogateFlowRate as _surrogate_flow_rate  # noqa: F401
 from . import TabulatedPolynomialModel as _tabulated_polynomial  # noqa: F401

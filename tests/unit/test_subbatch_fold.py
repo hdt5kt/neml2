@@ -41,9 +41,10 @@ both.
 
 from __future__ import annotations
 
+import pytest
 import torch
 
-from neml2.es.assembled import AssembledVector, wrap_group_raw
+from neml2.es.assembled import AssembledMatrix, AssembledVector, wrap_group_raw
 from neml2.es.axis_layout import AxisLayout
 from neml2.types import SR2, Scalar
 
@@ -185,3 +186,113 @@ def test_wrap_group_raw_two_sub_batch_block_tags_common_prefix():
     assert result.sub_batch_ndim == 1  # common only; extra folded into base
     assert tuple(result.sub_batch_shape) == (n_common,)
     assert result.batch_ndim == raw.ndim - 1 - 1  # minus common sub axis, minus base axis
+
+
+def test_group_common_override_retains_matched_prefix():
+    """A lone (N, M) member infers (N, M) as its common, but an explicit override pins
+    (N,) -- the generated-given-layout fix so disassembly keeps the folded M width.
+
+    Without the override, ``group_common_sub_batch`` takes the member's full shape and
+    ``var_extra_sub_batch`` is empty (folded width collapses to 1, dropping M). With it,
+    the extra axis (M,) is preserved and the per-site storage is ``base * M``.
+    """
+    n, m = 4, 3
+    specs = {"g_extra": Scalar}
+    shapes = {"g_extra": torch.Size([n, m])}
+    inferred = AxisLayout([["g_extra"]], specs, shapes, structure=["block"])
+    assert tuple(inferred.group_common_sub_batch(0)) == (n, m)  # the bug: infers full
+    assert tuple(inferred.var_extra_sub_batch(0, "g_extra")) == ()
+
+    pinned = AxisLayout([["g_extra"]], specs, shapes, structure=["block"], group_common=[(n,)])
+    assert tuple(pinned.group_common_sub_batch(0)) == (n,)
+    assert tuple(pinned.var_extra_sub_batch(0, "g_extra")) == (m,)
+    # The storage width assembly/disassembly slice by must include the folded M.
+    assert AssembledMatrix._var_storage(pinned, 0, "g_extra", "block") == m
+    assert AssembledMatrix._var_storage(inferred, 0, "g_extra", "block") == 1
+
+
+def test_group_common_override_rejects_non_prefix_member():
+    """An override that a member does not begin with is rejected."""
+    layout = AxisLayout(
+        [["g"]],
+        {"g": Scalar},
+        {"g": torch.Size([4, 3])},
+        structure=["block"],
+        group_common=[(5,)],
+    )
+    with pytest.raises(ValueError, match="explicit common prefix"):
+        layout.group_common_sub_batch(0)
+
+
+def test_group_common_length_validated():
+    """group_common must have one entry per group."""
+    with pytest.raises(ValueError, match="one per group"):
+        AxisLayout([["a"], ["b"]], {"a": Scalar, "b": Scalar}, structure=["block", "dense"],
+                   group_common=[(2,)])
+
+
+def test_fullify_sub_axis_selects_paired_k_and_resolves_negative_index():
+    """``fullify(sub_axis=)`` materializes only the K paired with that sub axis.
+
+    A wrong sub axis leaves the wrapper untouched; a negative index resolves to the
+    paired axis and eye-expands K (broadcast size 1 -> full size N, diagonal on the
+    (K, sub_pair) pair).
+    """
+    from neml2.types.functions import fullify
+
+    n = 3
+    w = Scalar(
+        torch.arange(1.0, n + 1).reshape(1, n),  # K=1 (broadcast), sub=n
+        sub_batch_ndim=1,
+        k_ndim=1,
+        k_state=("broadcast",),
+        k_pairing=(0,),
+    )
+    assert fullify(w, sub_axis=1) is w  # no K paired with sub axis 1 -> unchanged
+    out = fullify(w, sub_axis=-1)  # resolves to sub axis 0
+    assert out.k_state == ("full",)
+    assert out.k_pairing == (None,)
+    assert out.data.shape == (n, n)
+    torch.testing.assert_close(out.data, torch.diag(torch.arange(1.0, n + 1)))
+
+
+def test_fullify_noop_without_k_state():
+    """A wrapper with no K region is returned unchanged."""
+    from neml2.types.functions import fullify
+
+    w = Scalar(torch.ones(2, 2), sub_batch_ndim=1)
+    assert fullify(w, sub_axis=0) is w
+
+
+def test_equalize_tangent_K_eye_expands_paired_broadcast():
+    """A paired-broadcast K contribution is eye-expanded (not tiled) to the max K."""
+    from neml2.models.chain_rule import equalize_tangent_K
+
+    n = 3
+    c_full = Scalar(
+        torch.randn(n, n), sub_batch_ndim=1, k_ndim=1, k_state=("full",), k_pairing=(None,)
+    )
+    c_bcast = Scalar(
+        torch.arange(1.0, n + 1).reshape(1, n),
+        sub_batch_ndim=1,
+        k_ndim=1,
+        k_state=("broadcast",),
+        k_pairing=(0,),
+    )
+    out = equalize_tangent_K([c_full, c_bcast])
+    assert out[0].data.shape[0] == n
+    assert out[1].data.shape[0] == n and out[1].k_state == ("full",)
+    torch.testing.assert_close(out[1].data, torch.diag(torch.arange(1.0, n + 1)))
+
+
+def test_equalize_tangent_K_tiles_compact_unpaired():
+    """A compact (unpaired) full-K contribution is broadcast-tiled to the max K."""
+    from neml2.models.chain_rule import equalize_tangent_K
+
+    n = 3
+    kw = dict(sub_batch_ndim=0, k_ndim=1, k_state=("full",), k_pairing=(None,))
+    c_big = Scalar(torch.randn(n, 2), **kw)
+    c_small = Scalar(torch.ones(1, 2), **kw)
+    out = equalize_tangent_K([c_big, c_small])
+    assert out[1].data.shape[0] == n
+    torch.testing.assert_close(out[1].data, torch.ones(n, 2))

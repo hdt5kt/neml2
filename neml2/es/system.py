@@ -332,31 +332,45 @@ class ModelNonlinearSystem(NonlinearSystem):
 
             def _starts_with_common(name: str, _nc: int = nc, _uc: torch.Size = u_common) -> bool:
                 gs = given_sb.get(name)
-                return gs is not None and len(gs) >= _nc and tuple(gs[:_nc]) == tuple(_uc)
+                if gs is None:
+                    return False
+                # An empty common has no shared site axis: only sub-batch-trivial
+                # givens belong (otherwise every given matches the empty prefix).
+                if _nc == 0:
+                    return len(gs) == 0
+                return len(gs) >= _nc and tuple(gs[:_nc]) == tuple(_uc)
 
             matched = [g for g in self.given_names if g not in used and _starts_with_common(g)]
             if matched:
                 matched_by_order[orig] = matched
                 used.update(matched)
 
-        # Emit the matched block column groups in the original unknown-group order.
-        for orig, _u_common, _nc in block_specs:
+        # Emit the matched block column groups in the original unknown-group order,
+        # retaining each group's matched unknown common so the given layout does not
+        # re-infer a longer prefix from a lone (common, extra) member (which would
+        # fold extra into base at assembly but drop it at disassembly).
+        block_commons: list[torch.Size | None] = []
+        for orig, u_common, _nc in block_specs:
             if orig in matched_by_order:
                 block_groups.append(matched_by_order[orig])
                 block_structures.append("block")
+                block_commons.append(u_common)
         dense_remainder = [g for g in self.given_names if g not in used]
         all_groups = block_groups + ([dense_remainder] if dense_remainder else [])
         dense_tail: list[SubBatchStructure] = ["dense"] if dense_remainder else []
         all_structures: tuple[SubBatchStructure, ...] = tuple(block_structures + dense_tail)
+        group_common: list[torch.Size | None] = block_commons + ([None] if dense_remainder else [])
         if not all_groups:
             # No givens at all -- single empty DENSE group keeps invariants.
             all_groups = [[]]
             all_structures = ("dense",)
+            group_common = [None]
         return AxisLayout(
             all_groups,
             self.model.input_spec,
             sub_batch_shapes=given_sb,
             structure=all_structures,
+            group_common=group_common,
         )
 
     def setup_blayout(self, sub_batch_shapes: Mapping[str, torch.Size] | None = None) -> AxisLayout:

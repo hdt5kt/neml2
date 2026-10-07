@@ -81,6 +81,10 @@ class AxisLayout:
     specs: dict[str, type[TensorWrapper]]
     sub_batch_shapes: dict[str, torch.Size]
     structure: tuple[SubBatchStructure, ...]
+    #: Optional per-group explicit common sub-batch prefix (one entry per group;
+    #: ``None`` = infer from members). Used by generated layouts that must retain a
+    #: matched prefix rather than re-infer a longer one from a lone member.
+    group_common: tuple[torch.Size | None, ...]
 
     def __init__(
         self,
@@ -88,6 +92,7 @@ class AxisLayout:
         specs: dict[str, type[TensorWrapper]],
         sub_batch_shapes: dict[str, torch.Size] | None = None,
         structure: tuple[SubBatchStructure, ...] | list[SubBatchStructure] | None = None,
+        group_common: list[torch.Size | None] | tuple[torch.Size | None, ...] | None = None,
     ) -> None:
         normalized = tuple(tuple(group) for group in groups)
         missing = [name for group in normalized for name in group if name not in specs]
@@ -114,24 +119,42 @@ class AxisLayout:
                     raise ValueError(
                         f"AxisLayout: structure entries must be 'block' or 'dense', got {k!r}."
                     )
+        if group_common is None:
+            common_tuple: tuple[torch.Size | None, ...] = (None,) * len(normalized)
+        else:
+            common_tuple = tuple(None if c is None else torch.Size(c) for c in group_common)
+            if len(common_tuple) != len(normalized):
+                raise ValueError(
+                    f"AxisLayout: group_common has {len(common_tuple)} entries, expected "
+                    f"{len(normalized)} (one per group)."
+                )
         object.__setattr__(self, "groups", normalized)
         object.__setattr__(self, "specs", dict(specs))
         object.__setattr__(self, "sub_batch_shapes", sub)
         object.__setattr__(self, "structure", structure_tuple)
+        object.__setattr__(self, "group_common", common_tuple)
 
     def with_sub_batch_shapes(
         self,
         sub_batch_shapes: dict[str, torch.Size],
     ) -> AxisLayout:
         """Return a new layout with updated sub-batch shapes (frozen replacement)."""
-        return AxisLayout(self.groups, self.specs, sub_batch_shapes, self.structure)
+        return AxisLayout(
+            self.groups, self.specs, sub_batch_shapes, self.structure, self.group_common
+        )
 
     def sub_layout(self, index: int) -> AxisLayout:
         """Single-group sub-layout containing only ``self.groups[index]``."""
         group = self.groups[index]
         specs = {name: self.specs[name] for name in group}
         sub_batch = {name: self.sub_batch_shapes[name] for name in group}
-        return AxisLayout([list(group)], specs, sub_batch, (self.structure[index],))
+        return AxisLayout(
+            [list(group)],
+            specs,
+            sub_batch,
+            (self.structure[index],),
+            (self.group_common[index],),
+        )
 
     @property
     def ngroup(self) -> int:
@@ -163,15 +186,25 @@ class AxisLayout:
         BLOCK-group variables must share a common LEADING sub-batch prefix. That
         shared prefix is preserved as the block's intermediate axis; any EXTRA
         trailing sub-batch axes a variable carries are folded into that variable's
-        per-site base on assembly. The common prefix is the shortest
-        variable sub-batch shape in the group; every other variable must begin
-        with it (else the block can't share one intermediate axis). Returns the
-        empty shape for a DENSE group.
+        per-site base on assembly. The common prefix is :attr:`group_common` when set
+        explicitly, else the shortest variable sub-batch shape in the group; every
+        other variable must begin with it (else the block can't share one
+        intermediate axis). Returns the empty shape for a DENSE group.
         """
         group = self.groups[index]
         if not group or self.structure[index] != "block":
             return torch.Size(())
         shapes = [self.sub_batch_shapes.get(n, torch.Size(())) for n in group]
+        override = self.group_common[index]
+        if override is not None:
+            nc = len(override)
+            for name, sh in zip(group, shapes, strict=True):
+                if tuple(sh[:nc]) != tuple(override):
+                    raise ValueError(
+                        f"AxisLayout: BLOCK group {index} variables must begin with the "
+                        f"explicit common prefix {tuple(override)}; {name!r}={tuple(sh)} does not."
+                    )
+            return torch.Size(override)
         common = min(shapes, key=len)
         nc = len(common)
         for name, sh in zip(group, shapes, strict=True):

@@ -320,3 +320,169 @@ def test_dense_tangent_rejects_multi_extra_axis():
                 "g_extra": Scalar(g_extra, 1).with_sub_batch_ndim(3),
             }
         )
+
+
+def _model_string_diagonal(nb: int, n_common: int, n_extra: int):
+    """Block common x extra scenario with a DIAGONAL extra coupling (``r_extra = u_extra -
+    g_extra`` directly, no mixing), so the extra Jacobian block is per-index diagonal
+    rather than dense -- the ``_convert_tangent_to_paired_block_bothextra`` (block-diagonal
+    expand) path, as opposed to the dense ``_bothextra_dense`` path of ``_model_string``."""
+    return load_string(
+        f"""
+        [Settings]
+          [example_batch_shape]
+            u_common = '({nb}; {n_common})'
+            g_common = '({nb}; {n_common})'
+            u_extra  = '({nb}; {n_common}, {n_extra})'
+            g_extra  = '({nb}; {n_common}, {n_extra})'
+          []
+        []
+        [Models]
+          [r_common]
+            type = ScalarLinearCombination
+            from = 'u_common g_common'
+            to = 'r_common'
+            weights = '1 -1'
+          []
+          [r_extra]
+            type = ScalarLinearCombination
+            from = 'u_extra g_extra'
+            to = 'r_extra'
+            weights = '1 -1'
+          []
+          [residual]
+            type = ComposedModel
+            models = 'r_common r_extra'
+          []
+        []
+        [EquationSystems]
+          [eq_sys]
+            type = NonlinearSystem
+            model = 'residual'
+            unknowns  = 'u_common u_extra'
+            residuals = 'r_common r_extra'
+            structure = 'block'
+          []
+        []
+        [Solvers]
+          [lu]
+            type = DenseLU
+          []
+          [newton]
+            type = Newton
+            linear_solver = 'lu'
+            abs_tol = 1e-12
+            rel_tol = 1e-10
+            max_its = 25
+          []
+        []
+        [Models]
+          [model]
+            type = ImplicitUpdate
+            equation_system = 'eq_sys'
+            solver = 'newton'
+          []
+        []
+        """
+    ).get_model("model")
+
+
+def test_diagonal_both_extra_block_solves_to_givens():
+    """A diagonal (per-index) extra coupling drives the block-diagonal-expand bothextra
+    path; the root is simply ``u = g`` on both the common and extra unknowns."""
+    torch.manual_seed(3)
+    nb, n_common, n_extra = 2, 3, 4
+    model = _model_string_diagonal(nb, n_common, n_extra)
+    g_common = torch.randn(nb, n_common, dtype=torch.float64)
+    g_extra = torch.randn(nb, n_common, n_extra, dtype=torch.float64)
+    u_common, u_extra = _solve(model, g_common, g_extra)
+    torch.testing.assert_close(u_common, g_common, rtol=0, atol=1e-9)
+    torch.testing.assert_close(u_extra, g_extra, rtol=0, atol=1e-9)
+
+
+def _model_string_rowextra(nb: int, n_common: int, n_extra: int):
+    """Block group {u_common:(common,), u_extra:(common, extra)} where the extra residual
+    depends on the common-only unknown (``u_extra = g_extra - u_common`` per site). The
+    ``(r_extra, u_common)`` Jacobian block is a block row WITH extra against a common-only
+    column -- the ``_convert_tangent_to_paired_block_rowextra`` path."""
+    return load_string(
+        f"""
+        [Settings]
+          [example_batch_shape]
+            u_common = '({nb}; {n_common})'
+            g_common = '({nb}; {n_common})'
+            u_extra  = '({nb}; {n_common}, {n_extra})'
+            g_extra  = '({nb}; {n_common}, {n_extra})'
+          []
+        []
+        [Models]
+          [r_common]
+            type = ScalarLinearCombination
+            from = 'u_common g_common'
+            to = 'r_common'
+            weights = '1 -1'
+          []
+          [shift]
+            type = CommonToExtraOffset
+            e = 'u_extra'
+            c = 'u_common'
+            y = 'u_extra_shifted'
+          []
+          [r_extra]
+            type = ScalarLinearCombination
+            from = 'u_extra_shifted g_extra'
+            to = 'r_extra'
+            weights = '1 -1'
+          []
+          [residual]
+            type = ComposedModel
+            models = 'r_common shift r_extra'
+          []
+        []
+        [EquationSystems]
+          [eq_sys]
+            type = NonlinearSystem
+            model = 'residual'
+            unknowns  = 'u_common u_extra'
+            residuals = 'r_common r_extra'
+            structure = 'block'
+          []
+        []
+        [Solvers]
+          [lu]
+            type = DenseLU
+          []
+          [newton]
+            type = Newton
+            linear_solver = 'lu'
+            abs_tol = 1e-12
+            rel_tol = 1e-10
+            max_its = 25
+          []
+        []
+        [Models]
+          [model]
+            type = ImplicitUpdate
+            equation_system = 'eq_sys'
+            solver = 'newton'
+          []
+        []
+        """
+    ).get_model("model")
+
+
+def test_row_extra_depends_on_common_solves_to_closed_form():
+    """A per-(common, extra) residual coupled to the common-only unknown drives the
+    row-extra tangent fold. Closed form: ``u_common = g_common`` and, from
+    ``u_extra + u_common - g_extra = 0``, ``u_extra = g_extra - g_common`` per site."""
+    torch.manual_seed(11)
+    nb, n_common, n_extra = 2, 3, 4
+    model = _model_string_rowextra(nb, n_common, n_extra)
+    g_common = torch.randn(nb, n_common, dtype=torch.float64)
+    g_extra = torch.randn(nb, n_common, n_extra, dtype=torch.float64)
+    u_common, u_extra = _solve(model, g_common, g_extra)
+    torch.testing.assert_close(u_common, g_common, rtol=0, atol=1e-9)
+    expected_extra = g_extra - g_common.reshape(nb, n_common, 1)
+    torch.testing.assert_close(u_extra, expected_extra, rtol=0, atol=1e-9)
+
+
