@@ -484,5 +484,3 @@ def test_row_extra_depends_on_common_solves_to_closed_form():
     torch.testing.assert_close(u_common, g_common, rtol=0, atol=1e-9)
     expected_extra = g_extra - g_common.reshape(nb, n_common, 1)
     torch.testing.assert_close(u_extra, expected_extra, rtol=0, atol=1e-9)
-
-

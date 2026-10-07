@@ -227,8 +227,12 @@ def test_group_common_override_rejects_non_prefix_member():
 def test_group_common_length_validated():
     """group_common must have one entry per group."""
     with pytest.raises(ValueError, match="one per group"):
-        AxisLayout([["a"], ["b"]], {"a": Scalar, "b": Scalar}, structure=["block", "dense"],
-                   group_common=[(2,)])
+        AxisLayout(
+            [["a"], ["b"]],
+            {"a": Scalar, "b": Scalar},
+            structure=["block", "dense"],
+            group_common=[(2,)],
+        )
 
 
 def test_fullify_sub_axis_selects_paired_k_and_resolves_negative_index():
