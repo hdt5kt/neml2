@@ -309,20 +309,41 @@ class ModelNonlinearSystem(NonlinearSystem):
         block_groups: list[list[str]] = []
         block_structures: list[SubBatchStructure] = []
         used: set[str] = set()
-        for ugroup, ustructure in zip(self.unknown_groups, self._structure, strict=True):
+
+        # A given lands in a block col group if its sub_batch starts with that group's
+        # common (shortest-member) prefix; the extra trailing axes fold into base,
+        # keeping the per-site IFT cross-block O(N) rather than O(N^2) dense.
+        block_specs: list[tuple[int, torch.Size, int]] = []  # (orig_order, common, nc)
+        for orig, (ugroup, ustructure) in enumerate(
+            zip(self.unknown_groups, self._structure, strict=True)
+        ):
             if ustructure != "block":
                 continue
-            u_sb = next(
-                (sb[u] for u in ugroup if u in sb),
-                None,
-            )
-            if u_sb is None:
+            u_sbs = [sb[u] for u in ugroup if u in sb]
+            if not u_sbs:
                 continue
-            matched = [g for g in self.given_names if g not in used and given_sb.get(g) == u_sb]
+            u_common = min(u_sbs, key=len)
+            block_specs.append((orig, u_common, len(u_common)))
+
+        # Most-specific (longest common prefix) first, so a nested shorter-prefix group
+        # can't greedily capture a longer-prefix given; ties keep unknown-group order.
+        matched_by_order: dict[int, list[str]] = {}
+        for orig, u_common, nc in sorted(block_specs, key=lambda s: s[2], reverse=True):
+
+            def _starts_with_common(name: str, _nc: int = nc, _uc: torch.Size = u_common) -> bool:
+                gs = given_sb.get(name)
+                return gs is not None and len(gs) >= _nc and tuple(gs[:_nc]) == tuple(_uc)
+
+            matched = [g for g in self.given_names if g not in used and _starts_with_common(g)]
             if matched:
-                block_groups.append(matched)
-                block_structures.append("block")
+                matched_by_order[orig] = matched
                 used.update(matched)
+
+        # Emit the matched block column groups in the original unknown-group order.
+        for orig, _u_common, _nc in block_specs:
+            if orig in matched_by_order:
+                block_groups.append(matched_by_order[orig])
+                block_structures.append("block")
         dense_remainder = [g for g in self.given_names if g not in used]
         all_groups = block_groups + ([dense_remainder] if dense_remainder else [])
         dense_tail: list[SubBatchStructure] = ["dense"] if dense_remainder else []
