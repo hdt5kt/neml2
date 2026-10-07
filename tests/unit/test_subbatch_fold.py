@@ -46,7 +46,7 @@ import torch
 
 from neml2.es.assembled import AssembledMatrix, AssembledVector, wrap_group_raw
 from neml2.es.axis_layout import AxisLayout
-from neml2.types import SR2, Scalar
+from neml2.types import SR2, Scalar, TensorWrapper
 
 
 def _common_extra_layout(extra_cls, n_common: int, n_extra: int) -> AxisLayout:
@@ -197,13 +197,15 @@ def test_group_common_override_retains_matched_prefix():
     the extra axis (M,) is preserved and the per-site storage is ``base * M``.
     """
     n, m = 4, 3
-    specs = {"g_extra": Scalar}
+    specs: dict[str, type[TensorWrapper]] = {"g_extra": Scalar}
     shapes = {"g_extra": torch.Size([n, m])}
     inferred = AxisLayout([["g_extra"]], specs, shapes, structure=["block"])
     assert tuple(inferred.group_common_sub_batch(0)) == (n, m)  # the bug: infers full
     assert tuple(inferred.var_extra_sub_batch(0, "g_extra")) == ()
 
-    pinned = AxisLayout([["g_extra"]], specs, shapes, structure=["block"], group_common=[(n,)])
+    pinned = AxisLayout(
+        [["g_extra"]], specs, shapes, structure=["block"], group_common=[torch.Size([n])]
+    )
     assert tuple(pinned.group_common_sub_batch(0)) == (n,)
     assert tuple(pinned.var_extra_sub_batch(0, "g_extra")) == (m,)
     # The storage width assembly/disassembly slice by must include the folded M.
@@ -218,7 +220,7 @@ def test_group_common_override_rejects_non_prefix_member():
         {"g": Scalar},
         {"g": torch.Size([4, 3])},
         structure=["block"],
-        group_common=[(5,)],
+        group_common=[torch.Size([5])],
     )
     with pytest.raises(ValueError, match="explicit common prefix"):
         layout.group_common_sub_batch(0)
@@ -231,7 +233,7 @@ def test_group_common_length_validated():
             [["a"], ["b"]],
             {"a": Scalar, "b": Scalar},
             structure=["block", "dense"],
-            group_common=[(2,)],
+            group_common=[torch.Size([2])],
         )
 
 
@@ -294,9 +296,12 @@ def test_equalize_tangent_K_tiles_compact_unpaired():
     from neml2.models.chain_rule import equalize_tangent_K
 
     n = 3
-    kw = dict(sub_batch_ndim=0, k_ndim=1, k_state=("full",), k_pairing=(None,))
-    c_big = Scalar(torch.randn(n, 2), **kw)
-    c_small = Scalar(torch.ones(1, 2), **kw)
+    c_big = Scalar(
+        torch.randn(n, 2), sub_batch_ndim=0, k_ndim=1, k_state=("full",), k_pairing=(None,)
+    )
+    c_small = Scalar(
+        torch.ones(1, 2), sub_batch_ndim=0, k_ndim=1, k_state=("full",), k_pairing=(None,)
+    )
     out = equalize_tangent_K([c_big, c_small])
     assert out[1].data.shape[0] == n
     torch.testing.assert_close(out[1].data, torch.ones(n, 2))
