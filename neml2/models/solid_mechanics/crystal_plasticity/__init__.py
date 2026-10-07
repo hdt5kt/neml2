@@ -34,6 +34,7 @@ from .CrystalPlasticityDeformationGradientPredictor import (
     CrystalPlasticityDeformationGradientPredictor,
 )
 from .CrystalPlasticityStrainPredictor import CrystalPlasticityStrainPredictor
+from .DislocationInteractionStrengthMap import DislocationInteractionStrengthMap
 from .DislocationObstacleStrengthMap import DislocationObstacleStrengthMap
 from .ElasticStrainRate import ElasticStrainRate
 from .FixOrientation import FixOrientation
@@ -56,6 +57,7 @@ from .VoceSingleSlipHardeningRule import VoceSingleSlipHardeningRule
 __all__ = [
     "CrystalPlasticityDeformationGradientPredictor",
     "CrystalPlasticityStrainPredictor",
+    "DislocationInteractionStrengthMap",
     "DislocationObstacleStrengthMap",
     "ElasticStrainRate",
     "FixOrientation",
