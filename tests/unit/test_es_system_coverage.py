@@ -114,9 +114,10 @@ def test_setup_glayout_most_specific_first_and_dense_remainder():
     assert gl.groups == (("ga",), ("gab",), ("gdense", "gtrivial"))
     assert gl.structure == ("block", "block", "dense")
     # gab resolved to the (a,b) block (sort worked), ga to the (a,) block.
-    assert tuple(gl.group_common[0]) == (a,)
-    assert tuple(gl.group_common[1]) == (a, b)
-    assert gl.group_common[2] is None
+    gc0, gc1, gc2 = gl.group_common[0], gl.group_common[1], gl.group_common[2]
+    assert gc0 is not None and tuple(gc0) == (a,)
+    assert gc1 is not None and tuple(gc1) == (a, b)
+    assert gc2 is None
 
 
 def test_setup_glayout_no_givens_single_empty_dense():

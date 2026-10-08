@@ -148,7 +148,7 @@ def test_axis_layout_validation_and_misc_helpers():
         AxisLayout([["a"], ["b"]], {"a": Scalar, "b": Scalar}, structure=["dense"])
     # invalid structure entry.
     with pytest.raises(ValueError, match="'block' or 'dense'"):
-        AxisLayout([["a"]], {"a": Scalar}, structure=["sparse"])
+        AxisLayout([["a"]], {"a": Scalar}, structure=["sparse"])  # type: ignore[list-item]
     # BLOCK group mixing a sub-batch-trivial var with a sub-batched one (nc==0 guard).
     bad = AxisLayout(
         [["a", "b"]],
@@ -212,10 +212,11 @@ def test_vector_arithmetic_and_group_and_batch():
 def test_vector_norm_matches_manual():
     """norm / norm_sq sum squares over base (and the BLOCK common sub-batch)."""
     _, vec, values = _sample_vector()
-    expected = sum(
+    terms = [
         (values[n].data ** 2).sum(dim=tuple(range(1, values[n].data.ndim)))
         for n in ("u_grain", "u_slip", "d_slip")
-    )
+    ]
+    expected = torch.stack(terms).sum(dim=0)
     torch.testing.assert_close(norm_sq(vec), expected, rtol=0, atol=1e-10)
     torch.testing.assert_close(norm(vec), torch.sqrt(expected), rtol=0, atol=1e-10)
 
@@ -277,7 +278,7 @@ def test_matrix_select_blocks_roundtrips_disassemble():
     rl = _dense_layout([("a", Scalar), ("b", SR2)])
     cl = _dense_layout([("c", Scalar), ("d", Scalar)])
     m = _dense_matrix(rl, cl)
-    cells = m.disassemble().cells
+    cells = {rv: dict(inner) for rv, inner in m.disassemble().cells.items()}
     rebuilt = AssembledMatrix.select_blocks(rl, cl, cells)
     torch.testing.assert_close(rebuilt.tensors[0][0].data, m.tensors[0][0].data, rtol=0, atol=0)
 
@@ -287,7 +288,7 @@ def test_matrix_select_blocks_zero_fills_missing_pairs():
     rl = _dense_layout([("a", Scalar), ("b", Scalar)])
     cl = _dense_layout([("c", Scalar), ("d", Scalar)])
     m = _dense_matrix(rl, cl)
-    cells = m.disassemble().cells
+    cells = {rv: dict(inner) for rv, inner in m.disassemble().cells.items()}
     del cells["a"]["d"]  # drop one pair -> must come back as zeros
     rebuilt = AssembledMatrix.select_blocks(rl, cl, cells)
     full = rebuilt.tensors[0][0].data
@@ -342,7 +343,7 @@ def test_matrix_matmul_error_branches():
     with pytest.raises(ValueError, match="matching inner layouts"):
         _ = m @ x_bad
     with pytest.raises(TypeError):
-        _ = m @ 5  # neither vector nor matrix
+        _ = m @ 5  # type: ignore[operator]  # neither vector nor matrix
     m_bad = _dense_matrix(other, other)
     with pytest.raises(ValueError, match="matching inner layouts"):
         _ = m @ m_bad
