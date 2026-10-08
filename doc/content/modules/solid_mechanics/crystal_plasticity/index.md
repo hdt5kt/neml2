@@ -111,40 +111,146 @@ If you need to *post-process* an orientation (e.g. wrap the modified-Rodrigues p
 
 ## Latent (slip-system interaction) hardening
 
-[](models-DislocationInteractionStrengthMap) generalizes [](models-DislocationObstacleStrengthMap) with a slip-system **interaction matrix** $h$, so the forest density seen by system $i$ is a weighted sum over all systems,
+On an isolated slip system, the dislocations a system produces harden that
+same system — *self* hardening. In a real crystal, a dislocation gliding on
+system $i$ must also cut through the *forest* of dislocations that thread it
+from every other active system $r$; the junctions formed at those
+intersections raise the strength of system $i$ even though $i$ did not create
+them. This cross-system coupling is **latent hardening**, and
+[](models-DislocationInteractionStrengthMap) captures it by letting the forest
+density that hardens system $i$ be a weighted sum over all systems.
+
+Start from the self-hardening map [](models-DislocationObstacleStrengthMap),
+in which each system is strengthened only by its own dislocation density
+$\rho_i$ through a Taylor-type square-root law,
 
 $$
-\tau_i = \tau_0 + \alpha \mu b \sqrt{\sum_r h_{ir}\,\rho_r},
+\tau_i = \tau_0 + \alpha \mu b \sqrt{\rho_i},
 $$
 
-i.e. dislocations on system $r$ obstruct system $i$ through $h_{ir}$. With $h = I$ it reduces exactly to the diagonal self-hardening map. The forest sum must stay non-negative for every system (the square root is real only then): this holds for $\rho \ge 0$ and a non-negative $h$, so a calibrated $h$ must be constrained accordingly.
+with $\tau_0$ a lattice-friction offset, $\mu$ the shear modulus, $b$ the
+Burgers-vector magnitude, and $\alpha$ a dimensionless interaction
+coefficient. [](models-DislocationInteractionStrengthMap) generalizes this by
+introducing an $n_\text{slip}\times n_\text{slip}$ **interaction matrix** $h$
+and replacing the per-system density with a linear combination of every
+system's density,
 
-The matrix is an ordinary $n_\text{slip}\times n_\text{slip}$ material parameter — there are two ways to supply it, and the model accepts either:
+$$
+\tau_i = \tau_0 + \alpha \mu b \sqrt{\underbrace{\sum_{r=1}^{n_\text{slip}} h_{ir}\,\rho_r}_{F_i,\ \text{forest seen by system }i}}.
+$$
 
-1. **Give the whole matrix** — a `SquareMatrix` `[Tensors]` object with `fill = dense` (or any explicit tensor).
-2. **Build it from a handful of physical coefficients** — the Franciosi picture (self / coplanar / collinear / glissile / Hirth / Lomer). `SquareMatrix` with `fill = block` maps one coefficient per slip-family pair onto the full matrix via a `blocks` partition, so a 24-system, two-family lattice with self-coefficient `1.0` and latent-coefficient `0.4` is just
+Row $i$ of $h$ is thus a recipe for system $i$'s forest: the entry $h_{ir}$ sets
+how strongly a dislocation on system $r$ obstructs slip on system $i$. The
+diagonal $h_{ii}$ is self-hardening and the off-diagonals $h_{ir}$ ($r\neq i$)
+are latent hardening. Keeping only the diagonal, $h = I$, recovers
+[](models-DislocationObstacleStrengthMap) exactly ($F_i = \rho_i$).
 
-   ```ini
-   [Tensors]
-     [h]
-       type = SquareMatrix
-       fill = block        # one coefficient per (family, family) pair
-       blocks = '12 12'    # the slip-family partition (m = sum(blocks) = 24)
-       data = '1.0 0.4 0.4 1.0'
-     []
-   []
-   ```
+Because the strength involves $\sqrt{F_i}$, the forest sum must stay
+non-negative for every system (the square root and its derivative $\propto
+1/\sqrt{F_i}$ are real only then). This holds automatically for physical
+densities $\rho_r \ge 0$ and a non-negative matrix — for example the
+one-parameter family $h = I + q\,(\mathbf{1} - I)$ with latent ratio $q \ge 0$
+— so a calibrated $h$ must be constrained to keep it non-negative.
 
-   `fill = diagonal_blocks` instead gives a block-constant *diagonal* (distinct self-hardening per family, no latent coupling): `data = '1.0 0.8'`, `blocks = '12 12'`.
+### Building the interaction matrix
 
-`SquareMatrix` is geometry-agnostic (it never reads the lattice). The `blocks` partition and the slip-system ordering — which physical system is index $i$, and hence which entry of $h$ couples which pair — are the user's responsibility and must follow the ordering of the [](data-CubicCrystal) the matrix is paired with.
+$h$ is an ordinary $n_\text{slip}\times n_\text{slip}$ material parameter. For
+a cubic FCC lattice $n_\text{slip} = 12$, so a fully general $h$ carries $144$
+entries — far more than any experiment can resolve. The entries are not
+independent, though: by lattice symmetry the strength of an interaction
+depends only on the *geometric relationship* between the two systems (same
+system, coplanar, collinear, or forming a glissile junction, a Hirth lock, or
+a Lomer–Cottrell sessile lock), not on their individual identities. Collapsing
+$h$ to a handful of physical coefficients indexed by that relationship — rather
+than $n_\text{slip}^2$ free numbers — is the **Franciosi picture**, and the
+[](tensors-SquareMatrix) `[Tensors]` object builds $h$ from exactly such a
+reduced description.
 
-The same interaction matrix drives two **linear** interaction-hardening forms as well, for when the √-forest nonlinearity is not wanted:
+[](tensors-SquareMatrix) offers several `fill` patterns (`identity`, `zero`,
+`diagonal`, `diagonal_blocks`, `block`, `dense`). The one that realizes the
+Franciosi reduction is `fill = block`: the slip systems are partitioned into
+*families* by a `blocks` list (summing to $n_\text{slip}$), and `data` supplies
+one coefficient per family pair, row-major over the block grid —
+`data[bi*nb + bj]` fills the entire (family $bi$ rows) $\times$ (family $bj$
+columns) submatrix. A two-family lattice with self-coefficient $c_\text{self}$
+on the diagonal blocks and latent-coefficient $c_\text{lat}$ on the
+off-diagonal blocks is then just
 
-- [](models-LinearInteractionStrengthMap) — a strength map $\tau_i = \tau_{0,i} + \sum_j h_{ij}\,\phi_j$ from a per-slip hardening state $\phi$ (e.g. accumulated slip). The coupling Jacobian $h_{ij}$ is constant.
-- [](models-LinearInteractionHardeningRule) — an evolution rule $\dot{h}_i = \sum_j M_{ij}\,\lvert\dot{\gamma}_j\rvert$ that puts the interaction in the hardening *rate*; the strength is then the trivial per-slip sum $\tau_i = \tau_{0,i} + h_i$, composed from existing primitives. The $\lvert\cdot\rvert$ accumulates hardening regardless of slip direction.
+```ini
+[Tensors]
+  [h]
+    type = SquareMatrix
+    fill = block        # one coefficient per (family, family) pair
+    blocks = '12 12'    # the slip-family partition (m = sum(blocks) = 24)
+    data = '1.0 0.4 0.4 1.0'
+  []
+[]
+```
 
-All three (√-forest, linear-map, linear-rate) take the interaction matrix as an ordinary promotable parameter, so `SquareMatrix` builds it identically for any of them.
+Reading `data = 'c_self c_lat c_lat c_self'` onto a $2\times 2$ block grid (here
+shrunk to two families of **two** systems, so the full $4\times 4$ result fits
+on the page) gives
+
+$$
+h \;=\;
+\left(\begin{array}{cc|cc}
+c_\text{self} & c_\text{self} & c_\text{lat} & c_\text{lat}\\
+c_\text{self} & c_\text{self} & c_\text{lat} & c_\text{lat}\\ \hline
+c_\text{lat} & c_\text{lat} & c_\text{self} & c_\text{self}\\
+c_\text{lat} & c_\text{lat} & c_\text{self} & c_\text{self}
+\end{array}\right)
+\;=\;
+\begin{pmatrix}
+c_\text{self}\,\mathbf{1} & c_\text{lat}\,\mathbf{1}\\[3pt]
+c_\text{lat}\,\mathbf{1} & c_\text{self}\,\mathbf{1}
+\end{pmatrix},
+$$
+
+where $\mathbf{1}$ is the all-ones block of a family's size. The two **diagonal
+blocks** are set entirely by `data[0]` and `data[3]` (the self coefficient
+$c_\text{self}$); the two **off-diagonal blocks** by `data[1]` and `data[2]`
+(the latent coefficient $c_\text{lat}$). Reading along any row $i$ in the first
+family, the forest sum collects $c_\text{self}$ from every column of family 1
+and $c_\text{lat}$ from every column of family 2,
+
+$$
+F_i \;=\; c_\text{self}\!\!\sum_{r\in\text{family }1}\!\!\rho_r \;+\; c_\text{lat}\!\!\sum_{r\in\text{family }2}\!\!\rho_r,
+$$
+
+so the single pair $(c_\text{self}, c_\text{lat})$ sets how much a system is
+hardened by its own family versus the other — latent hardening in one picture.
+
+A few related fills are worth knowing:
+
+- `fill = diagonal_blocks` keeps only the diagonal *entries* of the diagonal
+  blocks (one scalar per family: `data = '1.0 0.8'`, `blocks = '12 12'`) —
+  distinct self-hardening per family with **no** latent coupling.
+- `fill = diagonal` sets each of the $n_\text{slip}$ diagonal entries
+  individually (`data` of length $n_\text{slip}$); `fill = identity` is the
+  self-hardening special case $h = I$.
+- `fill = dense` gives all $n_\text{slip}^2$ entries explicitly (row-major,
+  $h_{ij} =$ `data[i*n + j]`) — use it when the family picture is too coarse,
+  e.g. to separate the true self-term $h_{ii}$ from the within-family
+  (coplanar) interactions that a single `block` coefficient lumps together.
+
+[](tensors-SquareMatrix) is **geometry-agnostic** — it never reads the lattice.
+The `blocks` partition and the slip-system ordering (which physical system is
+index $i$, and hence which entry of $h$ couples which pair) are the user's
+responsibility and must follow the ordering of the [](data-CubicCrystal) the
+matrix is paired with. For a symmetric $h$ (the usual case) the ordering within
+a block is immaterial.
+
+### Linear interaction forms
+
+The same interaction matrix drives two **linear** interaction-hardening models,
+for when the square-root forest nonlinearity is not wanted:
+
+- [](models-LinearInteractionStrengthMap) — a strength map $\tau_i = \tau_{0,i} + \sum_j h_{ij}\,\phi_j$ from a per-slip hardening state $\phi$ (commonly the accumulated slip $|\gamma_j|$). The coupling is linear, so the Jacobian $\partial\tau_i/\partial\phi_j = h_{ij}$ is constant; with $h = I$ the systems decouple into independent linear hardening.
+- [](models-LinearInteractionHardeningRule) — an evolution rule $\dot{h}_i = \sum_j M_{ij}\,\lvert\dot{\gamma}_j\rvert$ that puts the interaction in the hardening *rate*, with the strength then the trivial per-slip sum $\tau_i = \tau_{0,i} + h_i$, composed from existing primitives. The $\lvert\cdot\rvert$ accumulates hardening regardless of slip direction.
+
+All three forms (√-forest, linear-map, linear-rate) take the interaction matrix as an ordinary promotable parameter carried on two `(n_slip, n_slip)` sub-batch axes, so [](tensors-SquareMatrix) builds it identically for any of them.
+
+Because $h$ is a *promotable* parameter it need not be constant: rather than a `[Tensors]` value it can be promoted and supplied by another `[Models]` output, so a **coupled, state-evolving** interaction matrix — one that itself evolves with the dislocation/junction structure during deformation — fits the same interface (the models re-read $h$ each step and the chain rule carries derivatives through it).
 
 **Wiring it in.** The strength map replaces the diagonal [](models-DislocationObstacleStrengthMap) in the slip-kinetics chain — it reads the per-slip state and the matrix `h` and emits the per-system `slip_strengths` that [](models-PowerLawSlipRule) consumes:
 
@@ -165,6 +271,75 @@ All three (√-forest, linear-map, linear-rate) take the interaction matrix as a
 
 For the linear strength-map form, swap `type = LinearInteractionStrengthMap` and read the per-slip hardening state (`slip_hardening = '...'`, `interaction_matrix = 'h'`, `constant_strength = ...`); for the rate form, use [](models-LinearInteractionHardeningRule) in the evolution (`slip_rates = '...'`, `interaction_matrix = 'h'`) and integrate its `slip_hardening_rate`. Every per-slip strength/rate here carries the slip-system axis as a sub-batch, so the solve folds `grain × slip` automatically.
 
+### In a Taylor polycrystal
+
+A single crystal is rarely the end goal; engineering response comes from a
+polycrystal aggregate of many grains. The simplest closure is the **Taylor
+(iso-strain) assumption**: every grain is subjected to the *same* macroscopic
+deformation, each grain integrates its own elastic strain, lattice orientation,
+and per-slip state from its own initial orientation, and the macroscopic stress
+is the volume average over grains,
+
+$$
+\bar{\sigma} = \frac{1}{N_\text{grain}}\sum_{g=1}^{N_\text{grain}} \sigma^{(g)}.
+$$
+
+Each grain's intra-grain update is exactly the single-crystal nonlinear system
+built above; the grains are coupled only weakly, through the shared macroscopic
+driving deformation and — under mixed stress/strain control — through the
+averaging constraint that ties the unknown macroscopic components to
+$\bar{\sigma}$. NEML2 assembles this as a two-group `NonlinearSystem` with
+`structure = 'block dense'`:
+
+- a **BLOCK** group of the per-grain unknowns — elastic strain, orientation,
+  and per-slip hardening for each grain. When the per-slip state carries the
+  extra slip sub-batch, these are folded `grain × slip` into one block axis.
+- a **DENSE** group of the global mixed-control unknowns shared by all grains.
+
+This block-diagonal structure — each grain's residual depends on its own
+unknowns plus the few global ones — is exactly what a
+[](solvers-SchurComplement) solver exploits: eliminate the global DENSE
+unknowns against the per-grain BLOCK diagonal, solve the small dense Schur
+system, then back-substitute per grain. Within a grain, the interaction matrix
+is what makes the intra-grain Jacobian block *dense* over the slip axis — with
+$h = I$ each system's strength depends only on its own density and the block is
+diagonal, whereas a full $h$ couples every system's residual to every other
+system's $\rho_r$. The `grain × slip` fold assembles that dense intra-grain
+block directly.
+
+**Identifiability.** Calibrating $h$ from a polycrystal test is subtler than it
+looks. Under a standard monotonic (proportional) load the slip systems activate
+together and the dislocation densities stay nearly uniform, $\rho_r \approx
+\bar{\rho}$. The forest sum then collapses to a scaled **row-sum** of $h$,
+
+$$
+F_i = \sum_r h_{ir}\,\rho_r \;\approx\; \bar{\rho}\sum_r h_{ir}.
+$$
+
+For a symmetric block matrix with crystallographically equivalent families,
+every row-sum is the *same* combination of the block coefficients. Taking the
+FCC case of four families of three systems, with self-coefficient
+$c_\text{self}$ on the diagonal blocks and a single latent coefficient
+$c_\text{lat}$ on all cross blocks, each row sums to
+
+$$
+\sum_r h_{ir} = 3\,c_\text{self} + 9\,c_\text{lat}
+$$
+
+(three same-family columns, nine cross-family columns) — identical for every
+row $i$. The macroscopic stress and texture therefore constrain only this one
+scalar combination, so a monotonic test identifies a **single** number, not the
+individual block coefficients. Calibration accordingly normalizes the self-block
+to $1$ and fits one **latent-hardening ratio** $q$ (so $c_\text{self} = 1$,
+$c_\text{lat} = q$) — a reduction confirmed empirically. Separating multiple
+block coefficients needs a dedicated cross-/latent-hardening protocol, e.g. a
+load-path change that activates the families in sequence.
+
+### See these in action
+
+- [](modules-solid-mechanics-crystal-plasticity-slip-anisotropy) — run the three ways of specifying $h$ (diagonal, `block`, `dense`) and overlay the stress–strain response and final texture.
+- [Slip-anisotropy calibration](tutorials-optimization-taylor-polycrystal) — a Taylor polycrystal with reorientation that recovers the latent-hardening ratio $q$ from synthetic stress + per-step texture through the pyzag chunked adjoint.
+
 ## Worked examples
 
 End-to-end notebooks that drive a single-crystal model through a rolling
@@ -176,6 +351,7 @@ reconstruct the deformed texture:
 
 formulations
 polefigures
+slip_anisotropy
 ```
 
 ## See also
