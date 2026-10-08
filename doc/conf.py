@@ -190,6 +190,7 @@ nb_execution_excludepatterns = [
     "modules/kwn/al_cu_ttp.ipynb",
     "modules/solid_mechanics/crystal_plasticity/formulations.ipynb",
     "modules/solid_mechanics/crystal_plasticity/polefigures.ipynb",
+    "modules/solid_mechanics/crystal_plasticity/slip_anisotropy.ipynb",
 ]
 
 # ---------------------------------------------------------------------------
