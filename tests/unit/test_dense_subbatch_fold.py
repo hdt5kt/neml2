@@ -49,13 +49,14 @@ from pathlib import Path
 import pytest
 import torch
 
-# The dense-coupling trigger is a test-only fixture under tests/regression/_fixtures.
+# The dense-coupling triggers are test-only fixtures under tests/unit/_fold_fixtures.
 sys.path.insert(0, str(Path(__file__).parent))
 import importlib  # noqa: E402
 
-importlib.import_module("_fixtures")
+importlib.import_module("_fold_fixtures")
 
 from neml2 import load_string  # noqa: E402
+from neml2.es.system import ModelNonlinearSystem  # noqa: E402
 from neml2.types import Scalar  # noqa: E402
 
 
@@ -484,3 +485,97 @@ def test_row_extra_depends_on_common_solves_to_closed_form():
     torch.testing.assert_close(u_common, g_common, rtol=0, atol=1e-9)
     expected_extra = g_extra - g_common.reshape(nb, n_common, 1)
     torch.testing.assert_close(u_extra, expected_extra, rtol=0, atol=1e-9)
+
+
+def _block_extra_vs_dense_model():
+    """Block group {u_common:(common,), u_extra:(common, extra)} plus a DENSE group
+    holding the sub-batch-trivial scalar unknown ``s``. The extra residual depends on
+    ``s`` (``r_extra = u_extra + s - g_extra``), so the ``(r_extra, s)`` Jacobian block
+    is a block row WITH an extra axis against a DENSE column."""
+    return load_string(
+        """
+        [Models]
+          [r_common]
+            type = ScalarLinearCombination
+            from = 'u_common g_common'
+            to = 'r_common'
+            weights = '1 -1'
+          []
+          [add]
+            type = AddScalarToExtra
+            e = 'u_extra'
+            s = 's'
+            y = 'u_extra_shifted'
+          []
+          [r_extra]
+            type = ScalarLinearCombination
+            from = 'u_extra_shifted g_extra'
+            to = 'r_extra'
+            weights = '1 -1'
+          []
+          [r_s]
+            type = ScalarLinearCombination
+            from = 's g_s'
+            to = 'r_s'
+            weights = '1 -1'
+          []
+          [residual]
+            type = ComposedModel
+            models = 'r_common add r_extra r_s'
+          []
+        []
+        """
+    ).get_model("residual")
+
+
+def test_block_extra_vs_dense_col_assembles():
+    """A block-extra residual coupled to a sub-batch-trivial unknown in a DENSE column
+    group drives the block-row-with-extra-against-a-dense-column tangent fold
+    (``_convert_tangent_to_block`` ``row_structure == 'block'`` extra-into-row-storage
+    branch). The Jacobian ``A = dR/du`` must assemble across the block + dense groups, and
+    its ``(r_extra, s)`` cross block must equal the constant ``dR_extra/ds = 1``."""
+    torch.manual_seed(13)
+    nb, n_common, n_extra = 2, 2, 3
+    system = ModelNonlinearSystem(
+        _block_extra_vs_dense_model(),
+        unknowns=[["u_common", "u_extra"], ["s"]],
+        residuals=[["r_common", "r_extra"], ["r_s"]],
+        structure=["block", "dense"],
+    )
+    u = {
+        "u_common": Scalar(torch.zeros(nb, n_common, dtype=torch.float64), 1).with_sub_batch_ndim(
+            1
+        ),
+        "u_extra": Scalar(
+            torch.zeros(nb, n_common, n_extra, dtype=torch.float64), 1
+        ).with_sub_batch_ndim(2),
+        "s": Scalar(torch.zeros(nb, dtype=torch.float64), 1),  # dense (sub-batch-trivial)
+    }
+    g = {
+        "g_common": Scalar(torch.randn(nb, n_common, dtype=torch.float64), 1).with_sub_batch_ndim(
+            1
+        ),
+        "g_extra": Scalar(
+            torch.randn(nb, n_common, n_extra, dtype=torch.float64), 1
+        ).with_sub_batch_ndim(2),
+        "g_s": Scalar(torch.randn(nb, dtype=torch.float64), 1),
+    }
+    u_sv, g_sv = system.to_sparse(
+        u,
+        g,
+        sub_batch_ndim={
+            "u_common": 1,
+            "u_extra": 2,
+            "s": 0,
+            "g_common": 1,
+            "g_extra": 2,
+            "g_s": 0,
+        },
+    )
+    system.initialize(u=u_sv, g=g_sv, dyn_shape=(nb,))
+    a_mat = system.A()
+    # Two row groups (block + dense) assembled; the (r_extra, s) cross block took the
+    # block-row-extra-vs-dense-col fold. r_extra = u_extra + s - g_extra -> dR_extra/ds = 1.
+    assert len(a_mat.tensors) == 2
+    dre_ds = a_mat.disassemble().cells["r_extra"]["s"].data
+    torch.testing.assert_close(dre_ds, torch.ones_like(dre_ds), rtol=0, atol=1e-12)

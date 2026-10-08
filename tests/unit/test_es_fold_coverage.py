@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import torch
 
-from neml2.es.assembled import AssembledMatrix, AssembledVector, norm, norm_sq
+from neml2.es.assembled import AssembledMatrix, AssembledVector, _common_prefix, norm, norm_sq
 from neml2.es.axis_layout import AxisLayout
 from neml2.types import SR2, Scalar, Tensor
 
@@ -390,3 +390,16 @@ def test_matrix_transpose_rejects_two_intmd_axes():
     m = AssembledMatrix(layout, layout, [[t]])
     with pytest.raises(NotImplementedError, match="at most one intermediate"):
         m.transpose()
+
+
+def test_common_prefix_stops_at_first_divergence():
+    """The paired-block common axis is the longest shared leading sub-batch prefix:
+    equal leading axes accumulate; the first mismatch stops it (shorter wins)."""
+    # Full match on the shorter shape (row common-only vs row+extra col).
+    assert _common_prefix((2,), (2, 3)) == (2,)
+    # Diverge at the second axis -> prefix truncates there (the break path).
+    assert _common_prefix((2, 3), (2, 5)) == (2,)
+    # Diverge at the very first axis -> empty common.
+    assert _common_prefix((4, 3), (2, 3)) == ()
+    # Two fully-equal shapes keep every axis.
+    assert _common_prefix((2, 3), (2, 3)) == (2, 3)
