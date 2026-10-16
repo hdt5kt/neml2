@@ -32,6 +32,7 @@ from ....types import Scalar, sqrt, sum
 from ....types.functions import fullify
 from ...chain_rule import ChainRuleAction, ChainRuleDict
 from ...model import Model
+from ._interaction import check_interaction_matrix
 
 
 @register_neml2_object("DislocationInteractionStrengthMap")
@@ -105,29 +106,6 @@ class DislocationInteractionStrengthMap(Model):
         rho_r = rho.sub_batch.unsqueeze(-2)  # (..., 1, n_slip_r)
         return sum((h * rho_r).sub_batch, -1)  # contract r -> (..., n_slip_i)
 
-    @staticmethod
-    def _check_consistency(rho: Scalar, h: Scalar) -> None:
-        """Dimension check: the interaction matrix must be square and its slip count
-        must match the dislocation density, giving a clear error instead of a raw
-        broadcast failure. Skipped under tracing, where the shapes are already
-        fixed/validated eagerly."""
-        import torch  # local: only for the tracing guard
-
-        if torch.compiler.is_compiling():
-            return
-        hs = tuple(int(s) for s in h.shape)
-        if len(hs) < 2 or hs[-1] != hs[-2]:
-            raise ValueError(
-                "DislocationInteractionStrengthMap: interaction_matrix must be square "
-                f"(n_slip x n_slip); got trailing shape {hs[-2:] if len(hs) >= 2 else hs}."
-            )
-        n_rho = int(rho.shape[-1]) if rho.ndim >= 1 else 1
-        if hs[-1] != n_rho:
-            raise ValueError(
-                f"DislocationInteractionStrengthMap: interaction_matrix slip count {hs[-1]} "
-                f"does not match dislocation_density slip count {n_rho}."
-            )
-
     def forward(  # type: ignore[override]
         self,
         rho: Scalar,
@@ -140,7 +118,7 @@ class DislocationInteractionStrengthMap(Model):
         b = self._get_param("b", promoted_params, Scalar)
         h = self._get_param("interaction_matrix", promoted_params, Scalar)
 
-        self._check_consistency(rho, h)
+        check_interaction_matrix(type(self).__name__, rho, h, "dislocation_density")
         forest = self._forest_density(rho, h)
         sqrt_forest = sqrt(forest)
         coeff = alpha * mu * b

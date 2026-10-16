@@ -114,9 +114,9 @@ def test_m_inferred_from_blocks():
     [
         ("m=3\nfill=diagonal\ndata='1 2'", "length m"),
         ("m=4\nfill=block\ndata='1 2 3 4'\nblocks='2 3'", "sum to m"),
-        ("m=4\nfill=block\ndata='1 2 3'\nblocks='2 2'", "type 'block'"),
-        ("m=2\nfill=dense\ndata='1 2 3'", "type 'dense'"),
-        ("m=3\nfill=bogus", "invalid type"),
+        ("m=4\nfill=block\ndata='1 2 3'\nblocks='2 2'", "fill 'block'"),
+        ("m=2\nfill=dense\ndata='1 2 3'", "fill 'dense'"),
+        ("m=3\nfill=bogus", "invalid fill"),
         ("fill=diagonal\ndata='1 2 3'", "required unless"),
     ],
 )

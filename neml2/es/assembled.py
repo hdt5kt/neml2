@@ -1293,6 +1293,17 @@ def _convert_tangent_to_block(
         # ``k_state[len(common):len(col_sub_batch)]``; the trailing K_base axes (full for
         # any non-scalar per-site state) are excluded -- base width is carried by
         # ``col_var_base``.
+        # The slice is positional, so k_state must carry that ordering: one axis per col
+        # sub-batch plus one K_base axis for a non-scalar col. Fail loudly on a collapsed
+        # K rather than letting the slice empty and silently mis-route to the diagonal.
+        k_base_count = 1 if col_var_base > 1 else 0
+        if len(t_block.k_state) != len(_col_sb_t) + k_base_count:
+            raise ValueError(
+                "equation-system tangent fold (both-extra): k_state length "
+                f"{len(t_block.k_state)} != col sub-batch {len(_col_sb_t)} + base "
+                f"{k_base_count} (k_state={t_block.k_state}); cannot classify a "
+                "collapsed K by position."
+            )
         if any(s == "full" for s in t_block.k_state[len(_common) : len(_col_sb_t)]):
             return _convert_tangent_to_paired_block_bothextra_dense(
                 t_block,

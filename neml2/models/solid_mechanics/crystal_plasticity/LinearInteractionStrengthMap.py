@@ -32,6 +32,7 @@ from ....types import Scalar, sum
 from ....types.functions import fullify
 from ...chain_rule import ChainRuleAction, ChainRuleDict
 from ...model import Model
+from ._interaction import check_interaction_matrix
 
 
 @register_neml2_object("LinearInteractionStrengthMap")
@@ -76,26 +77,6 @@ class LinearInteractionStrengthMap(Model):
         phi_j = phi.sub_batch.unsqueeze(-2)  # (..., 1, n_slip_j)
         return sum((h * phi_j).sub_batch, -1)  # contract j -> (..., n_slip_i)
 
-    @staticmethod
-    def _check_consistency(phi: Scalar, h: Scalar) -> None:
-        """The interaction matrix must be square and match the per-slip state's slip count."""
-        import torch  # local: only for the tracing guard
-
-        if torch.compiler.is_compiling():
-            return
-        hs = tuple(int(s) for s in h.shape)
-        if len(hs) < 2 or hs[-1] != hs[-2]:
-            raise ValueError(
-                "LinearInteractionStrengthMap: interaction_matrix must be square "
-                f"(n_slip x n_slip); got trailing shape {hs[-2:] if len(hs) >= 2 else hs}."
-            )
-        n_phi = int(phi.shape[-1]) if phi.ndim >= 1 else 1
-        if hs[-1] != n_phi:
-            raise ValueError(
-                f"LinearInteractionStrengthMap: interaction_matrix slip count {hs[-1]} does "
-                f"not match slip_hardening slip count {n_phi}."
-            )
-
     def forward(  # type: ignore[override]
         self,
         phi: Scalar,
@@ -105,7 +86,7 @@ class LinearInteractionStrengthMap(Model):
         tau_const = self._get_param("constant_strength", promoted_params, Scalar)
         h = self._get_param("interaction_matrix", promoted_params, Scalar)
 
-        self._check_consistency(phi, h)
+        check_interaction_matrix(type(self).__name__, phi, h, "slip_hardening")
         tau = tau_const + self._combine(phi, h)
 
         if v is None:

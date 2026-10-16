@@ -752,3 +752,87 @@ def test_dense_row_reduces_block_extra_col_assembles():
         .expand(nb, n_common, n_common, n_extra)
     )
     torch.testing.assert_close(cell, expected, rtol=0, atol=1e-12)
+
+
+def _dense_reduces_block_extra_sr2_model():
+    """SR2 (base 6) counterpart of :func:`_dense_reduces_block_extra_model`: the reduced
+    BLOCK ``(common, extra)`` unknown ``u_extra`` is non-scalar (``col_var_base = 6``), so
+    the dense-row/block-col col-extra fold flattens ``(extra, col_base)`` rather than a
+    size-1 base. ``r_p = p - sum_i u_extra_{g,i}`` with ``p`` a per-common SR2."""
+    return load_string(
+        """
+        [Models]
+          [r_common]
+            type = ScalarLinearCombination
+            from = 'u_common g_common'
+            to = 'r_common'
+            weights = '1 -1'
+          []
+          [sumex]
+            type = SumExtraSR2
+            e = 'u_extra'
+            y = 'u_extra_sum'
+          []
+          [r_p]
+            type = SR2LinearCombination
+            from = 'p u_extra_sum'
+            to = 'r_p'
+            weights = '1 -1'
+          []
+          [r_extra]
+            type = SR2LinearCombination
+            from = 'u_extra g_extra'
+            to = 'r_extra'
+            weights = '1 -1'
+          []
+          [residual]
+            type = ComposedModel
+            models = 'r_common sumex r_p r_extra'
+          []
+        []
+        """
+    ).get_model("residual")
+
+
+def test_dense_row_reduces_block_extra_col_sr2_assembles():
+    """Non-scalar (SR2) column variant of the dense-row/block-col fold: with ``col_var_base
+    = 6`` the col-extra fold must flatten ``(extra, col_base)`` in that order. The ``(r_p,
+    u_extra)`` cross cell is ``dR_p/du_extra = -I_6`` on the common diagonal, dense over
+    every extra index; the extra-major col storage (extra outermost, base innermost) is
+    what pins the ordering -- a base-major flatten would scramble the 6x6 identity."""
+    torch.manual_seed(23)
+    nb, n_common, n_extra, bs = 2, 3, 4, 6
+    system = ModelNonlinearSystem(
+        _dense_reduces_block_extra_sr2_model(),
+        unknowns=[["u_common", "u_extra"], ["p"]],
+        residuals=[["r_common", "r_extra"], ["r_p"]],
+        structure=["block", "dense"],
+    )
+    uc = Scalar(torch.zeros(nb, n_common, dtype=torch.float64), 1).with_sub_batch_ndim(1)
+    ue = SR2(torch.zeros(nb, n_common, n_extra, bs, dtype=torch.float64), 3).with_sub_batch_ndim(2)
+    p0 = SR2(torch.zeros(nb, n_common, bs, dtype=torch.float64), 2).with_sub_batch_ndim(1)
+    gc = Scalar(torch.randn(nb, n_common, dtype=torch.float64), 1).with_sub_batch_ndim(1)
+    ge = SR2(torch.randn(nb, n_common, n_extra, bs, dtype=torch.float64), 3).with_sub_batch_ndim(2)
+    u = {"u_common": uc, "u_extra": ue, "p": p0}
+    g = {"g_common": gc, "g_extra": ge}
+    u_sv, g_sv = system.to_sparse(
+        u, g, sub_batch_ndim={"u_common": 1, "u_extra": 2, "p": 1, "g_common": 1, "g_extra": 2}
+    )
+    system.initialize(u=u_sv, g=g_sv, dyn_shape=(nb,))
+    a_mat = system.A()
+    assert len(a_mat.tensors) == 2
+    # (r_p, u_extra): (dyn, col_common, row=common*base, col_storage=extra*base).
+    cell = a_mat.disassemble().cells["r_p"]["u_extra"].data
+    assert tuple(cell.shape) == (nb, n_common, n_common * bs, n_extra * bs)
+    # cell[dyn, h, g*bs + a, j*bs + b] = -1 iff g == h and a == b (independent of j).
+    delta_common = torch.eye(n_common, dtype=torch.float64)  # [h, g]
+    delta_base = torch.eye(bs, dtype=torch.float64)  # [a, b]
+    expected = -(
+        delta_common.reshape(n_common, n_common, 1, 1, 1) * delta_base.reshape(1, 1, bs, 1, bs)
+    ).expand(n_common, n_common, bs, n_extra, bs)
+    expected = (
+        expected.reshape(n_common, n_common * bs, n_extra * bs)
+        .unsqueeze(0)
+        .expand(nb, n_common, n_common * bs, n_extra * bs)
+    )
+    torch.testing.assert_close(cell, expected, rtol=0, atol=1e-12)

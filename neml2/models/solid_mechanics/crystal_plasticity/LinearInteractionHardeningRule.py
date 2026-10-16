@@ -32,6 +32,7 @@ from ....types import Scalar, abs, sign, sum
 from ....types.functions import fullify
 from ...chain_rule import ChainRuleAction, ChainRuleDict
 from ...model import Model
+from ._interaction import check_interaction_matrix
 
 
 @register_neml2_object("LinearInteractionHardeningRule")
@@ -79,26 +80,6 @@ class LinearInteractionHardeningRule(Model):
         g_j = g.sub_batch.unsqueeze(-2)  # (..., 1, n_slip_j)
         return sum((m * g_j).sub_batch, -1)  # contract j -> (..., n_slip_i)
 
-    @staticmethod
-    def _check_consistency(gamma_dot: Scalar, m: Scalar) -> None:
-        """The interaction matrix must be square and match the slip-rate slip count."""
-        import torch  # local: only for the tracing guard
-
-        if torch.compiler.is_compiling():
-            return
-        ms = tuple(int(s) for s in m.shape)
-        if len(ms) < 2 or ms[-1] != ms[-2]:
-            raise ValueError(
-                "LinearInteractionHardeningRule: interaction_matrix must be square "
-                f"(n_slip x n_slip); got trailing shape {ms[-2:] if len(ms) >= 2 else ms}."
-            )
-        n_g = int(gamma_dot.shape[-1]) if gamma_dot.ndim >= 1 else 1
-        if ms[-1] != n_g:
-            raise ValueError(
-                f"LinearInteractionHardeningRule: interaction_matrix slip count {ms[-1]} does "
-                f"not match slip_rates slip count {n_g}."
-            )
-
     def forward(  # type: ignore[override]
         self,
         h: Scalar,
@@ -109,7 +90,7 @@ class LinearInteractionHardeningRule(Model):
         del h  # the rate depends only on the slip rates (structural zero wrt slip_hardening)
         m = self._get_param("interaction_matrix", promoted_params, Scalar)
 
-        self._check_consistency(gamma_dot, m)
+        check_interaction_matrix(type(self).__name__, gamma_dot, m, "slip_rates")
         abs_gamma = abs(gamma_dot)
         rate = self._combine(abs_gamma, m)
 

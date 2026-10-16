@@ -100,7 +100,7 @@ class SquareMatrix:
         option(
             "data",
             list,
-            "Coefficients; required length depends on 'type' (n for diagonal, "
+            "Coefficients; required length depends on 'fill' (n for diagonal, "
             "len(blocks) for diagonal_blocks, len(blocks)**2 for block, n**2 for dense).",
             default=[],
         ),
@@ -148,7 +148,7 @@ class SquareMatrix:
         if kind == "diagonal":
             if len(data) != n:
                 raise ValueError(
-                    f"SquareMatrix type 'diagonal': 'data' must have length m={n}, got {len(data)}."
+                    f"SquareMatrix fill 'diagonal': 'data' must have length m={n}, got {len(data)}."
                 )
             return torch.diag(torch.tensor(data, dtype=dtype))
         if kind == "diagonal_blocks":
@@ -156,7 +156,7 @@ class SquareMatrix:
             cls_._check_blocks(blocks, n)
             if len(data) != len(blocks):
                 raise ValueError(
-                    f"SquareMatrix type 'diagonal_blocks': 'data' and 'blocks' must have "
+                    f"SquareMatrix fill 'diagonal_blocks': 'data' and 'blocks' must have "
                     f"equal length, got {len(data)} and {len(blocks)}."
                 )
             diag = torch.cat(
@@ -169,7 +169,7 @@ class SquareMatrix:
             nb = len(blocks)
             if len(data) != nb * nb:
                 raise ValueError(
-                    f"SquareMatrix type 'block': 'data' must have length "
+                    f"SquareMatrix fill 'block': 'data' must have length "
                     f"len(blocks)**2={nb * nb}, got {len(data)}."
                 )
             offsets = [0, *accumulate(blocks)]
@@ -183,19 +183,19 @@ class SquareMatrix:
         if kind == "dense":
             if len(data) != n * n:
                 raise ValueError(
-                    f"SquareMatrix type 'dense': 'data' must have length m**2={n * n}, "
+                    f"SquareMatrix fill 'dense': 'data' must have length m**2={n * n}, "
                     f"got {len(data)}."
                 )
             return torch.tensor(data, dtype=dtype).reshape(n, n)
         raise ValueError(
-            f"SquareMatrix: invalid type {kind!r}; expected one of 'identity', 'zero', "
+            f"SquareMatrix: invalid fill {kind!r}; expected one of 'identity', 'zero', "
             "'diagonal', 'diagonal_blocks', 'block', 'dense'."
         )
 
     @staticmethod
     def _check_blocks(blocks: list[int], n: int) -> None:
         if not blocks:
-            raise ValueError("SquareMatrix: 'blocks' is required for this type.")
+            raise ValueError("SquareMatrix: 'blocks' is required for this fill.")
         if any(b <= 0 for b in blocks):
             raise ValueError(f"SquareMatrix: 'blocks' entries must be positive, got {blocks}.")
         if sum(blocks) != n:
