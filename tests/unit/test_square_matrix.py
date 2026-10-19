@@ -118,6 +118,10 @@ def test_m_inferred_from_blocks():
         ("m=2\nfill=dense\ndata='1 2 3'", "fill 'dense'"),
         ("m=3\nfill=bogus", "invalid fill"),
         ("fill=diagonal\ndata='1 2 3'", "required unless"),
+        # An option the chosen fill never consumes is rejected, not silently ignored.
+        ("m=3\nfill=identity\ndata='1 2 3'", "does not use 'data'"),
+        ("m=3\nfill=zero\nblocks='1 2'", "does not use 'blocks'"),
+        ("m=2\nfill=dense\ndata='1 2 3 4'\nblocks='1 1'", "does not use 'blocks'"),
     ],
 )
 def test_dimension_errors(body, msg):

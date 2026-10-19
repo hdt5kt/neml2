@@ -113,6 +113,17 @@ class SquareMatrix:
         ),
     )
 
+    # Which of the optional coefficient inputs each fill consumes, so an option that a
+    # fill would silently ignore is rejected instead. Order is the user-facing fill list.
+    _FILL_USES: dict[str, tuple[str, ...]] = {
+        "identity": (),
+        "zero": (),
+        "diagonal": ("data",),
+        "diagonal_blocks": ("data", "blocks"),
+        "block": ("data", "blocks"),
+        "dense": ("data",),
+    }
+
     @classmethod
     def from_hit(cls, node: nmhit.Node, factory: _NativeInputFile) -> Any:
         del factory  # geometry-agnostic: nothing is resolved against the input file
@@ -134,11 +145,21 @@ class SquareMatrix:
         mat = cls._build(n, kind, data, blocks)
         return Scalar(mat).sub_batch.retag(2)
 
-    @staticmethod
-    def _build(n: int, kind: str, data: list[float], blocks: list[int]) -> torch.Tensor:
+    @classmethod
+    def _build(cls, n: int, kind: str, data: list[float], blocks: list[int]) -> torch.Tensor:
         """Return the ``(n, n)`` float64 matrix for the requested fill pattern."""
         if n <= 0:
             raise ValueError(f"SquareMatrix: 'm' must be positive, got {n}.")
+        if kind not in cls._FILL_USES:
+            raise ValueError(
+                f"SquareMatrix: invalid fill {kind!r}; expected one of "
+                f"{', '.join(repr(k) for k in cls._FILL_USES)}."
+            )
+        uses = cls._FILL_USES[kind]
+        if data and "data" not in uses:
+            raise ValueError(f"SquareMatrix: fill {kind!r} does not use 'data'; remove it.")
+        if blocks and "blocks" not in uses:
+            raise ValueError(f"SquareMatrix: fill {kind!r} does not use 'blocks'; remove it.")
         dtype = torch.float64
 
         if kind == "identity":
@@ -152,8 +173,7 @@ class SquareMatrix:
                 )
             return torch.diag(torch.tensor(data, dtype=dtype))
         if kind == "diagonal_blocks":
-            cls_ = SquareMatrix
-            cls_._check_blocks(blocks, n)
+            cls._check_blocks(blocks, n)
             if len(data) != len(blocks):
                 raise ValueError(
                     f"SquareMatrix fill 'diagonal_blocks': 'data' and 'blocks' must have "
@@ -164,8 +184,7 @@ class SquareMatrix:
             )
             return torch.diag(diag)
         if kind == "block":
-            cls_ = SquareMatrix
-            cls_._check_blocks(blocks, n)
+            cls._check_blocks(blocks, n)
             nb = len(blocks)
             if len(data) != nb * nb:
                 raise ValueError(
@@ -187,10 +206,8 @@ class SquareMatrix:
                     f"got {len(data)}."
                 )
             return torch.tensor(data, dtype=dtype).reshape(n, n)
-        raise ValueError(
-            f"SquareMatrix: invalid fill {kind!r}; expected one of 'identity', 'zero', "
-            "'diagonal', 'diagonal_blocks', 'block', 'dense'."
-        )
+        # Unreachable: kind validity is checked against _FILL_USES above.
+        raise AssertionError(f"unhandled fill {kind!r}")
 
     @staticmethod
     def _check_blocks(blocks: list[int], n: int) -> None:
