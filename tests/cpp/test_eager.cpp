@@ -406,7 +406,8 @@ main(int argc, char ** argv)
   if (argc >= 10)
   {
     const auto sm = load_model(argv[9], "model");
-    NEML2_CHECK(sm.input_names() == std::vector<std::string>({"u_per", "u_glob", "g_glob", "g_per"}));
+    NEML2_CHECK(sm.input_names() ==
+                std::vector<std::string>({"u_per", "u_glob", "g_glob", "g_per"}));
     NEML2_CHECK(sm.input_sub_batch_shapes() ==
                 std::vector<std::vector<int64_t>>({{3}, {}, {}, {3}}));
     NEML2_CHECK(sm.output_names() == std::vector<std::string>({"u_per", "u_glob"}));

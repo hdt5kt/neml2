@@ -796,6 +796,50 @@ def test_sub_batch_undeclared_with_batch_ndim():
         torch.testing.assert_close(got[n], ref[n].data, rtol=1e-12, atol=1e-14)
 
 
+def _kwn_inputs(b=2, seed=0):
+    """Positive KWN inputs with t > t~1 and small per-bin number densities."""
+    g = torch.Generator().manual_seed(seed)
+    t_old = 0.1 + 0.5 * torch.rand(b, generator=g, dtype=torch.float64)
+    return {
+        "number_density~1": 1e-3 * torch.rand(b, 100, generator=g, dtype=torch.float64),
+        "t": t_old + 0.1 + 0.5 * torch.rand(b, generator=g, dtype=torch.float64),
+        "t~1": t_old,
+    }
+
+
+def test_sub_batch_undeclared_jacobian_jvp_with_batch_ndim():
+    """Without [Settings], batch_ndim alone splits the KWN history input: the
+    Jacobian has columns for the plain inputs only and matches central finite
+    differences, and jvp equals J times the tangent."""
+    m = _EagerModel(str(_KWN), "model")
+    raw = _kwn_inputs()
+    _, J = m.jacobian(raw, batch_ndim=1)
+    plain = ("t", "t~1")
+    assert set(J) == set(m.output_names)
+    for row in J.values():
+        assert set(row) == set(plain)
+    assert J["number_density"]["t"].shape == (2, 100)
+    # h = 1e-4 balances the O(h^2) truncation against the Newton tolerance noise
+    # (which grows like 1/h); the blocks span ~1e-6 to ~1e2 in magnitude, so the
+    # tolerance is relative to each block's own scale.
+    h = 1e-4
+    for i in plain:
+        rp, rm = dict(raw), dict(raw)
+        rp[i], rm[i] = raw[i] + h, raw[i] - h
+        fp, fm = m.forward(rp, batch_ndim=1), m.forward(rm, batch_ndim=1)
+        for o in m.output_names:
+            fd = (fp[o] - fm[o]) / (2 * h)
+            torch.testing.assert_close(J[o][i], fd, rtol=1e-5, atol=1e-5 * fd.abs().max().item())
+
+    g = torch.Generator().manual_seed(1)
+    tang = {i: torch.rand(2, generator=g, dtype=torch.float64) for i in plain}
+    outputs, jv = m.jvp(raw, tang, batch_ndim=1)
+    for o in m.output_names:
+        expect = sum(J[o][i] * tang[i].reshape(2, *([1] * (J[o][i].ndim - 1))) for i in plain)
+        assert jv[o].shape == outputs[o].shape
+        torch.testing.assert_close(jv[o], expect, rtol=1e-12, atol=1e-14)
+
+
 def test_sub_batch_model_without_settings_runs():
     """A model whose own geometry makes an output sub-batched (per-slip) runs on
     eager and matches native; nothing is declared, so the accessor is empty."""
@@ -889,6 +933,82 @@ def test_sub_batch_param_derivatives_rejected():
     raw = {"strain": torch.rand(2, 5, 6, dtype=torch.float64)}
     with pytest.raises(NotImplementedError, match="plain-batch only"):
         m.param_jacobian(raw)
+
+
+def test_sub_batch_param_vjp_rejected_before_evaluation(monkeypatch):
+    """param_vjp rejects a sub-batched call too, and both parameter paths reject
+    a sub-batched input before running the model."""
+    path = _REPO / "tests" / "aoti" / "forward_sub_batch" / "model.i"
+    m = _EagerModel(str(path), "model")
+    raw = {"strain": torch.rand(2, 5, 6, dtype=torch.float64)}
+    cot = {n: torch.ones_like(v) for n, v in m.forward(raw).items()}
+    with pytest.raises(NotImplementedError, match="plain-batch only"):
+        m.param_vjp(raw, cot)
+
+    def _no_eval(*args, **kwargs):
+        raise AssertionError("the model ran before the sub-batch guard")
+
+    monkeypatch.setattr(m, "_eval", _no_eval)
+    with pytest.raises(NotImplementedError, match="plain-batch only"):
+        m.param_jacobian(raw)
+    with pytest.raises(NotImplementedError, match="plain-batch only"):
+        m.param_vjp(raw, cot)
+
+
+def test_jvp_outputs_materialized_like_outputs():
+    """jvp outputs come back at the same shape as the value outputs, contiguous,
+    including an output that does not depend on the seeded input (zero branch)."""
+    path = _REPO / "tests" / "aoti" / "forward_sub_batch_plain_output" / "model.i"
+    m = _EagerModel(str(path), "model")
+    raw = {
+        "x": torch.rand(3, 4, dtype=torch.float64),
+        "t": torch.rand((), dtype=torch.float64),
+    }
+    tang = torch.rand(3, dtype=torch.float64)
+    outputs, jv = m.jvp(raw, {"t": tang})
+    for n in m.output_names:
+        assert jv[n].shape == outputs[n].shape
+        assert jv[n].is_contiguous()
+    # x_scaled = 2 x does not depend on t: the zero branch.
+    assert torch.count_nonzero(jv["x_scaled"]) == 0
+    torch.testing.assert_close(jv["y"], 3.0 * tang)
+
+
+def test_assemble_jvp_outputs_materializes_on_dynamic_batch():
+    """With the call's dynamic batch, both the zero and the summed branch are
+    lifted to the shape unwrap_outputs gives the value output."""
+    from neml2.types import Scalar
+    from neml2.types._boundary import assemble_jvp_outputs, unwrap_outputs
+
+    outs = (Scalar(torch.rand(1, 4), sub_batch_ndim=1), Scalar(torch.rand(1)))
+    names = ["a", "b"]
+    v_out = {"b": {"t": Scalar(torch.rand(1, 1), k_ndim=1, k_state=("full",), k_pairing=(None,))}}
+    values = unwrap_outputs(outs, names, (3,))
+    jv = assemble_jvp_outputs(v_out, outs, names, (3,))
+    for n in names:
+        assert jv[n].shape == values[n].shape
+        assert jv[n].is_contiguous()
+    assert values["a"].shape == (3, 4)
+    assert values["b"].shape == (3,)
+
+
+def test_output_plan_failure_fails_load_with_context(monkeypatch):
+    """A failure while working out the declared output extents fails the load
+    and says so, naming the file and model."""
+    import neml2.cli.aoti_export as aoti_export
+
+    def _boom(*args, **kwargs):
+        raise KeyError("segment probe failed")
+
+    monkeypatch.setattr(aoti_export, "plan_output_sub_batch_shapes", _boom)
+    path = _REPO / "tests" / "aoti" / "forward_sub_batch" / "model.i"
+    with pytest.raises(RuntimeError, match="output sub-batch shapes") as err:
+        _EagerModel(str(path), "model")
+    msg = str(err.value)
+    assert "[Settings]/example_batch_shape" in msg
+    assert str(path) in msg and "'model'" in msg
+    assert "segment probe failed" in msg
+    assert isinstance(err.value.__cause__, KeyError)
 
 
 # --- #3 convergence failure surfaces as the recoverable typed exception -------
