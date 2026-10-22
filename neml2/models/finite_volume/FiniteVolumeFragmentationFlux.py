@@ -29,7 +29,6 @@ from __future__ import annotations
 from ...factory import register_neml2_object
 from ...schema import HitSchema, input, output
 from ...types import Scalar, cumsum, triu
-from ...types.functions import fullify
 from ..chain_rule import ChainRuleDict
 from ..model import Model
 
@@ -138,29 +137,26 @@ class FiniteVolumeFragmentationFlux(Model):
         coeff_rhoj = -K / rho_j
         coeff_vj = -K / v_j
 
-        # Each action fullifies its tangent (cumsum/triu in _assemble mix the row
-        # axis, so the K-paired grid must be materialised first). dv couples both
-        # k and j (product rule); rho and v are numerator at k, denominator at j
+        # _assemble's cumsum fullifies any K pairing on the row axis it mixes, so
+        # compact tangents pass straight through. dv couples both k and j
+        # (product rule); rho and v are numerator at k, denominator at j
         # (quotient rule); gamma and p enter only at one slot.
         def p_action(V_in: Scalar) -> Scalar:
-            return self._assemble(coeff_p * fullify(V_in))
+            return self._assemble(coeff_p * V_in)
 
         def gamma_action(V_in: Scalar) -> Scalar:
-            return self._assemble(coeff_g * fullify(V_in).sub_batch.unsqueeze(0))
+            return self._assemble(coeff_g * V_in.sub_batch.unsqueeze(0))
 
         def dv_action(V_in: Scalar) -> Scalar:
-            Vf = fullify(V_in)
-            dK = coeff_dvk * Vf.sub_batch.unsqueeze(1) + coeff_dvj * Vf.sub_batch.unsqueeze(0)
+            dK = coeff_dvk * V_in.sub_batch.unsqueeze(1) + coeff_dvj * V_in.sub_batch.unsqueeze(0)
             return self._assemble(dK)
 
         def rho_action(V_in: Scalar) -> Scalar:
-            Vf = fullify(V_in)
-            dK = coeff_rhok * Vf.sub_batch.unsqueeze(1) + coeff_rhoj * Vf.sub_batch.unsqueeze(0)
+            dK = coeff_rhok * V_in.sub_batch.unsqueeze(1) + coeff_rhoj * V_in.sub_batch.unsqueeze(0)
             return self._assemble(dK)
 
         def v_action(V_in: Scalar) -> Scalar:
-            Vf = fullify(V_in)
-            dK = coeff_vk * Vf.sub_batch.unsqueeze(1) + coeff_vj * Vf.sub_batch.unsqueeze(0)
+            dK = coeff_vk * V_in.sub_batch.unsqueeze(1) + coeff_vj * V_in.sub_batch.unsqueeze(0)
             return self._assemble(dK)
 
         actions = {
