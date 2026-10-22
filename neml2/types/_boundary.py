@@ -231,6 +231,7 @@ def contract_jacobian_block(
 def unwrap_outputs(
     typed_outs: tuple[TensorWrapper, ...],
     output_names: list[str],
+    dynamic_batch: tuple[int, ...] | torch.Size | None = None,
 ) -> dict[str, torch.Tensor]:
     """Unwrap a native model's typed output tuple to a raw ``{name: Tensor}`` dict.
 
@@ -240,11 +241,22 @@ def unwrap_outputs(
     boundary -- the raw tensors leave for the C++ ``neml2::eager::Model`` here,
     so this is the one place that legitimately reads ``.data`` (see the module
     docstring + CLAUDE.md "Hard rules / Rule 1").
+
+    With *dynamic_batch* (the inputs' common batch), each output is materialized
+    to ``(*B, *sub_batch, *base)`` and made contiguous, as the AOTI runtime does,
+    so a host reads each batch entry as one contiguous block. ``B`` is
+    *dynamic_batch* broadcast with the output's own batch, which a batched
+    parameter can make larger than the inputs'.
     """
-    return {
-        name: wrapper.data  # data-ok eager embed boundary
-        for name, wrapper in zip(output_names, typed_outs, strict=True)
-    }
+    out: dict[str, torch.Tensor] = {}
+    for name, wrapper in zip(output_names, typed_outs, strict=True):
+        data = wrapper.data  # data-ok eager embed boundary
+        if dynamic_batch is not None:
+            batch = torch.broadcast_shapes(dynamic_batch, wrapper.dynamic_batch_shape)
+            target = (*batch, *wrapper.sub_batch_shape, *wrapper.BASE_SHAPE)
+            data = data.broadcast_to(target).contiguous()
+        out[name] = data
+    return out
 
 
 def assemble_jvp_outputs(
@@ -294,7 +306,9 @@ def assemble_jacobian(
     ``{out_name: {in_name: (*batch, *out_base, *in_base)}}`` matching the C++
     ``neml2::aoti::Model::jacobian`` contract (rows in ``output_spec`` order, cols
     in ``input_spec`` order). A constant ``(out, in)`` pair (absent from
-    ``v_out``) is an explicit zero block.
+    ``v_out``) is an explicit zero block at
+    ``(*batch, *out_sub_batch, *out_base, *in_base)``: the batch is the first
+    output's plain batch and the sub-batch is that row's own output's.
 
     Reuses :func:`neml2.cli.aoti_export._leading_k_block_to_per_pair` (the AOTI
     export's own block-to-pair converter, lazily imported to avoid import-time
@@ -303,18 +317,21 @@ def assemble_jacobian(
     from ..cli.aoti_export import _leading_k_block_to_per_pair
 
     first = typed_outputs[0]
-    batch_shape = tuple(first.batch_shape)
+    # `batch_shape` would bundle the first output's sub-batch axes into every
+    # row; take the plain batch and add each row's own sub-batch below.
+    batch_shape = tuple(first.dynamic_batch_shape)
     opts = {"dtype": first.dtype, "device": first.device}
     jac: dict[str, dict[str, torch.Tensor]] = {}
-    for o_name in output_names:
+    for typed_out, o_name in zip(typed_outputs, output_names, strict=True):
         o_base = tuple(output_spec[o_name].BASE_SHAPE)
+        o_sub = tuple(typed_out.sub_batch_shape)
         row: dict[str, torch.Tensor] = {}
         for i_name in input_names:
             i_base = tuple(input_spec[i_name].BASE_SHAPE)
             block = v_out.get(o_name, {}).get(i_name)
             if block is None:
                 # Constant (out, in) pair: a structural zero block.
-                row[i_name] = torch.zeros(*batch_shape, *o_base, *i_base, **opts)
+                row[i_name] = torch.zeros(*batch_shape, *o_sub, *o_base, *i_base, **opts)
             else:
                 # (*batch, *out_base, *in_base).
                 row[i_name] = _leading_k_block_to_per_pair(block, input_spec[i_name]).contiguous()
