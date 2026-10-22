@@ -54,7 +54,7 @@ _COMPOSED = _REPO / "tests" / "aoti" / "forward_composed" / "model.i"
 # A minimal ImplicitUpdate (Newton solve) -- used to exercise the convergence path.
 _IMPLICIT = _REPO / "tests" / "aoti" / "implicit_simple" / "model.i"
 # A crystal-plasticity leaf whose CrystalGeometry introduces a per-slip sub-batch
-# axis internally -- the eager runtime must reject it (plain-batch only).
+# axis internally: plain inputs, a sub-batched output, no [Settings].
 _SUB_BATCH = (
     _REPO / "tests" / "models" / "solid_mechanics" / "crystal_plasticity" / "ResolvedShear.i"
 )
@@ -708,13 +708,187 @@ def test_param_vjp_through_implicit_matches_jacobian_and_fd():
         )
 
 
-# --- #2 plain-batch guard: reject sub-batch (crystal-plasticity) models -------
+# --- #2 sub-batched variables -------------------------------------------------
+
+# AOTI scenarios whose [Settings] declares the sub-batch extents.
+_SUB_BATCH_SCENARIOS = [
+    "forward_sub_batch",
+    "forward_sub_batch_2d",
+    "forward_sub_batch_composed",
+    "implicit_sub_batch",
+    "implicit_cross_group_sub_batch",
+    "forward_sub_batch_plain_output",
+]
+# KWN growth-only: sub-batched history `number_density~1`, no [Settings].
+_KWN = _REPO / "tests" / "regression" / "kwn" / "growth-only-scaled" / "model.i"
 
 
-def test_sub_batch_model_rejected():
+def _sub_batch_inputs(names, spec, sub_of, b=2, seed=0):
+    """Positive inputs at each variable's (b, *sub, *base) shape."""
+    g = torch.Generator().manual_seed(seed)
+    return {
+        n: 0.1 + 0.5 * torch.rand(b, *(sub_of(n) or ()), *spec[n].BASE_SHAPE, generator=g)
+        for n in names
+    }
+
+
+def _native_outputs(path, raw, sub_of):
+    native = neml2.load_model(str(path), "model")
+    args = [t(raw[n], sub_batch_ndim=len(sub_of(n) or ())) for n, t in native.input_spec.items()]
+    with torch.no_grad():
+        out = native(*args)
+    out = out if isinstance(out, tuple) else (out,)
+    return dict(zip(native.output_spec, out, strict=True))
+
+
+@pytest.mark.parametrize("scenario", _SUB_BATCH_SCENARIOS)
+@pytest.mark.parametrize("batch_ndim", [None, 1])
+def test_sub_batch_forward_matches_native(scenario, batch_ndim):
+    """Declared extents are reported, and forward matches the native model at
+    (*B, *sub, *base), contiguous -- from the declaration or from batch_ndim."""
+    from neml2.factory import load_input
+
+    path = _REPO / "tests" / "aoti" / scenario / "model.i"
+    settings = load_input(str(path)).settings
+    m = _EagerModel(str(path), "model")
+    assert m.input_sub_batch_shapes == [
+        list(settings.sub_batch_shape(n) or ()) for n in m.input_names
+    ]
+    raw = _sub_batch_inputs(m.input_names, m.input_spec, settings.sub_batch_shape)
+    ref = _native_outputs(path, raw, settings.sub_batch_shape)
+    got = m.forward(raw, batch_ndim=batch_ndim)
+    for i, n in enumerate(m.output_names):
+        assert m.output_sub_batch_shapes[i] == list(ref[n].sub_batch_shape)
+        assert got[n].shape == ref[n].data.shape
+        assert got[n].is_contiguous()
+        torch.testing.assert_close(got[n], ref[n].data, rtol=1e-12, atol=1e-14)
+
+
+def test_output_sub_batch_shapes_match_compile_plan():
+    """The eager output extents are the ones neml2-compile records, worked out
+    without compiling or solving."""
+    from neml2.cli.aoti_export import plan_output_sub_batch_shapes
+
+    path = _REPO / "tests" / "aoti" / "implicit_cross_group_sub_batch" / "model.i"
+    m = _EagerModel(str(path), "model")
+    planned = plan_output_sub_batch_shapes(str(path), "model")
+    assert planned == {"u_per": [3]}
+    assert m.output_sub_batch_shapes == [[3], []]
+
+
+def test_sub_batch_undeclared_with_batch_ndim():
+    """Without [Settings], the caller states the batch axes: the KWN history
+    input is split by batch_ndim and forward matches native. The accessors
+    report nothing declared."""
+    m = _EagerModel(str(_KWN), "model")
+    assert m.input_sub_batch_shapes == [[]] * len(m.input_names)
+    assert m.output_sub_batch_shapes == [[]] * len(m.output_names)
+
+    def sub_of(n):
+        return (100,) if n == "number_density~1" else None
+
+    raw = _sub_batch_inputs(m.input_names, m.input_spec, sub_of)
+    raw["number_density~1"] = raw["number_density~1"] * 1e-3
+    ref = _native_outputs(_KWN, raw, sub_of)
+    got = m.forward(raw, batch_ndim=1)
+    for n in m.output_names:
+        assert got[n].shape == ref[n].data.shape
+        torch.testing.assert_close(got[n], ref[n].data, rtol=1e-12, atol=1e-14)
+
+
+def test_sub_batch_model_without_settings_runs():
+    """A model whose own geometry makes an output sub-batched (per-slip) runs on
+    eager and matches native; nothing is declared, so the accessor is empty."""
     m = _EagerModel(str(_SUB_BATCH), "model")
-    with pytest.raises(NotImplementedError, match="sub_batch"):
-        m.forward(_rand_inputs(m, 3))
+    native = neml2.load_model(str(_SUB_BATCH), "model")
+    raw = _rand_inputs(m, 3)
+    got = m.forward(raw)
+    with torch.no_grad():
+        ref = native(*(t(raw[n]) for n, t in native.input_spec.items()))
+    ref = ref if isinstance(ref, tuple) else (ref,)
+    assert m.output_sub_batch_shapes == [[]] * len(m.output_names)
+    for n, r in zip(m.output_names, ref, strict=True):
+        assert r.sub_batch_ndim > 0
+        torch.testing.assert_close(got[n], r.data.broadcast_to(got[n].shape))
+
+
+def test_sub_batch_extent_mismatch_raises():
+    """A tensor that does not carry its declared extent is rejected; a size-1
+    axis broadcasts to the extent."""
+    path = _REPO / "tests" / "aoti" / "implicit_cross_group_sub_batch" / "model.i"
+    m = _EagerModel(str(path), "model")
+    raw = {
+        n: torch.rand(2, *s, dtype=torch.float64) + 0.1
+        for n, s in zip(m.input_names, m.input_sub_batch_shapes, strict=True)
+    }
+    bad = dict(raw, u_per=torch.rand(2, 4, dtype=torch.float64))
+    with pytest.raises(ValueError, match="declared in"):
+        m.forward(bad)
+    with pytest.raises(ValueError, match="declared in"):
+        m.forward(bad, batch_ndim=1)
+    lifted = dict(raw, g_per=raw["g_per"][:, :1])
+    expanded = dict(raw, g_per=raw["g_per"][:, :1].expand(2, 3))
+    torch.testing.assert_close(m.forward(lifted)["u_per"], m.forward(expanded)["u_per"])
+
+
+def test_unknown_declared_name_raises(tmp_path):
+    """A [Settings] declaration naming no model variable fails the load, as it
+    fails neml2-compile."""
+    src = (_REPO / "tests" / "aoti" / "forward_sub_batch_plain_output" / "model.i").read_text()
+    bad = tmp_path / "model.i"
+    bad.write_text(src.replace("t = '(2,)'", "t = '(2,)'\n    nope = '(2; 4)'"))
+    with pytest.raises(ValueError, match="nope"):
+        _EagerModel(str(bad), "model")
+
+
+def test_sub_batch_jacobian_plain_columns_match_fd():
+    """Jacobian columns are the plain inputs only; each block, including a
+    sub-batched row, matches central finite differences."""
+    path = _REPO / "tests" / "aoti" / "implicit_cross_group_sub_batch" / "model.i"
+    m = _EagerModel(str(path), "model")
+    raw = {
+        n: 0.1
+        + 0.5 * torch.rand(2, *s, dtype=torch.float64, generator=torch.Generator().manual_seed(1))
+        for n, s in zip(m.input_names, m.input_sub_batch_shapes, strict=True)
+    }
+    _, J = m.jacobian(raw)
+    assert set(J) == {"u_per", "u_glob"}
+    for row in J.values():
+        assert set(row) == {"u_glob", "g_glob"}
+    assert J["u_per"]["g_glob"].shape == (2, 3)
+    h = 1e-4
+    for i in ("u_glob", "g_glob"):
+        rp, rm = dict(raw), dict(raw)
+        rp[i], rm[i] = raw[i] + h, raw[i] - h
+        fp, fm = m.forward(rp), m.forward(rm)
+        for o in ("u_per", "u_glob"):
+            fd = (fp[o] - fm[o]) / (2 * h)
+            # Absolute tolerance: d(solution)/d(initial guess) is exactly 0 and
+            # meets FD noise from the Newton tolerance.
+            torch.testing.assert_close(J[o][i], fd, rtol=0, atol=1e-7)
+
+
+def test_sub_batch_jvp_rejects_sub_batched_tangent():
+    path = _REPO / "tests" / "aoti" / "implicit_cross_group_sub_batch" / "model.i"
+    m = _EagerModel(str(path), "model")
+    raw = {
+        n: torch.rand(2, *s, dtype=torch.float64) + 0.1
+        for n, s in zip(m.input_names, m.input_sub_batch_shapes, strict=True)
+    }
+    with pytest.raises(ValueError, match="plain-batch inputs only"):
+        m.jvp(raw, {"g_per": torch.ones(2, 3, dtype=torch.float64)})
+    _, J = m.jacobian(raw)
+    t = torch.rand(2, dtype=torch.float64)
+    _, jv = m.jvp(raw, {"g_glob": t})
+    torch.testing.assert_close(jv["u_per"], J["u_per"]["g_glob"] * t[:, None])
+
+
+def test_sub_batch_param_derivatives_rejected():
+    path = _REPO / "tests" / "aoti" / "forward_sub_batch" / "model.i"
+    m = _EagerModel(str(path), "model")
+    raw = {"strain": torch.rand(2, 5, 6, dtype=torch.float64)}
+    with pytest.raises(NotImplementedError, match="plain-batch only"):
+        m.param_jacobian(raw)
 
 
 # --- #3 convergence failure surfaces as the recoverable typed exception -------
