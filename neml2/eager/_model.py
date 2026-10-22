@@ -172,11 +172,20 @@ class _EagerModel:
         declares_sub = any(
             settings.sub_batch_shape(n) is not None for n in model_variable_names(model)
         )
-        planned = (
-            plan_output_sub_batch_shapes(input_file, model_name, device=str(self._device))
-            if declares_sub
-            else {}
-        )
+        planned: dict[str, list[int]] = {}
+        if declares_sub:
+            # The extents are authoritative, so a planner failure fails the load;
+            # say where it came from, since the model itself may evaluate fine.
+            try:
+                planned = plan_output_sub_batch_shapes(
+                    input_file, model_name, device=str(self._device)
+                )
+            except Exception as err:
+                raise RuntimeError(
+                    f"EagerModel: could not work out the output sub-batch shapes for the "
+                    f"[Settings]/example_batch_shape declaration of model {model_name!r} in "
+                    f"{input_file!r} (the compile plan failed: {type(err).__name__}: {err})."
+                ) from err
         self.output_sub_batch_shapes: list[list[int]] = [
             list(planned.get(n, [])) for n in self.output_names
         ]
@@ -225,9 +234,11 @@ class _EagerModel:
 
     def _check_canonical(self, name: str, t: torch.Tensor, *, kind: str) -> None:
         """Reject a non-canonical tensor: its trailing axes must equal the
-        variable's declared base shape, so an input/tangent is `(*B, *base)`
-        (e.g. an SR2 is `(*B, 6)`, never `(*B, 1)` or `(*B, 3, 2)`). A Scalar has
-        an empty base shape, so any leading shape is a valid batch.
+        variable's declared base shape (e.g. an SR2 ends in `6`, never `1` or
+        `(3, 2)`). Only the trailing base is checked here; the leading axes are
+        `(*B, *sub_batch)` for an input and `(*B,)` for a tangent, split by
+        :meth:`_sub_batch_ndim`. A Scalar has an empty base shape, so any
+        leading shape passes.
         """
         base = tuple(self.input_spec[name].BASE_SHAPE)
         bn = len(base)
@@ -247,9 +258,11 @@ class _EagerModel:
         declared extent is checked against the tensor either way, as AOTI checks
         its compiled metadata; a size-1 axis broadcasts to the declared extent.
         """
-        base_ndim = self.input_spec[name].BASE_NDIM
+        base_ndim = len(self.input_spec[name].BASE_SHAPE)
         declared = self._declared_sub[name]
         if batch_ndim is not None:
+            # Clamp, not error: an input with fewer leading axes than batch_ndim
+            # (e.g. a base-only 0-d time) has no sub-batch and broadcasts.
             n = max(t.ndim - base_ndim - batch_ndim, 0)
         elif declared is not None:
             n = len(declared)
@@ -328,19 +341,17 @@ class _EagerModel:
             n for n, ta in zip(self.input_names, typed_args, strict=True) if ta.sub_batch_ndim == 0
         ]
 
-    def _reject_sub_batch(self, typed_args: tuple, typed_outputs: tuple, what: str) -> None:
+    def _reject_sub_batch(self, names: list[str], wrappers: tuple, what: str) -> None:
         """Guard for the parameter-derivative paths, which are plain-batch only.
 
         ``forward`` / ``jvp`` / ``jacobian`` accept sub-batched variables; the
         reverse-mode parameter derivatives have not been extended to them, so a
         call that carries one is rejected instead of returning mis-shaped blocks.
+        Called on the inputs before the evaluation (so a rejected call pays no
+        solve) and on the outputs after it (a plain input can still produce a
+        sub-batched output).
         """
-        names = list(self.input_names) + list(self.output_names)
-        bad = [
-            n
-            for n, w in zip(names, (*typed_args, *typed_outputs), strict=True)
-            if w.sub_batch_ndim > 0
-        ]
+        bad = [n for n, w in zip(names, wrappers, strict=True) if w.sub_batch_ndim > 0]
         if bad:
             raise NotImplementedError(
                 f"EagerModel {what}: {bad} carry sub-batch axes; parameter derivatives "
@@ -397,8 +408,8 @@ class _EagerModel:
         input is rejected: derivatives are taken with respect to plain-batch
         inputs only. Returns ``(outputs, jvp_outputs)`` -- both keyed by
         ``output_names``, mirroring the C++ ``neml2::aoti::Model::jvp`` contract;
-        ``jvp_outputs[name]`` is the directional derivative at the output's
-        natural ``(*batch, *out_sub_batch, *out_base)``.
+        ``jvp_outputs[name]`` is the directional derivative, materialized like
+        ``outputs[name]`` at ``(*B, *out_sub_batch, *out_base)``, contiguous.
 
         Implemented on the native chain rule: each tangent is seeded as a single
         leading-K (K=1) direction; the per-input contributions to each output are
@@ -433,7 +444,7 @@ class _EagerModel:
         typed_outputs, v_out = self._eval(typed_args, v=seed)
         outputs = unwrap_outputs(typed_outputs, self.output_names, common_dyn)
         assert v_out is not None
-        jvp_outputs = assemble_jvp_outputs(v_out, typed_outputs, self.output_names)
+        jvp_outputs = assemble_jvp_outputs(v_out, typed_outputs, self.output_names, common_dyn)
         return outputs, jvp_outputs
 
     def jacobian(
@@ -536,10 +547,11 @@ class _EagerModel:
         from ..models.param_ad import param_jacobian as _param_jacobian
 
         typed_args, common_dyn = self._typed_args(inputs)
-        # Plain forward for the value outputs + the sub-batch guard; the
+        self._reject_sub_batch(self.input_names, typed_args, "param_jacobian")
+        # Plain forward for the value outputs + the output half of the guard; the
         # parameter Jacobian re-runs the forward under functional_call.
         typed_outputs, _ = self._eval(typed_args)
-        self._reject_sub_batch(typed_args, typed_outputs, "param_jacobian")
+        self._reject_sub_batch(self.output_names, typed_outputs, "param_jacobian")
         outputs = unwrap_outputs(typed_outputs, self.output_names, common_dyn)
         pjac = _param_jacobian(
             self._model,
@@ -567,14 +579,16 @@ class _EagerModel:
         swap's backward, exactly as in :meth:`param_jacobian`.
 
         *cotangents* maps each output name to ``w_o`` at the output's
-        ``(*batch, *out_base)`` shape (raw tensor; sub-batch is rejected upstream).
+        ``(*batch, *out_base)`` shape (raw tensor). A call whose inputs or outputs
+        carry sub-batch axes raises ``NotImplementedError``.
         """
         from ..models.param_ad import param_vjp as _param_vjp
 
         typed_args, _ = self._typed_args(inputs)
-        # Plain forward runs the sub-batch guard before the adjoint.
+        self._reject_sub_batch(self.input_names, typed_args, "param_vjp")
+        # Plain forward runs the output half of the guard before the adjoint.
         typed_outputs, _ = self._eval(typed_args)
-        self._reject_sub_batch(typed_args, typed_outputs, "param_vjp")
+        self._reject_sub_batch(self.output_names, typed_outputs, "param_vjp")
         return _param_vjp(
             self._model,
             typed_args,
