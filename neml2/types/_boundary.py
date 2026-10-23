@@ -286,17 +286,24 @@ def assemble_jvp_outputs(
     out: dict[str, torch.Tensor] = {}
     for typed_out, name in zip(typed_outputs, output_names, strict=True):
         contribs = v_out.get(name, {})
-        if not contribs:
-            # Same (*batch, *out_base) shape as the value output, all zeros.
-            data = torch.zeros_like(typed_out.data)  # data-ok eager embed boundary
-        else:
-            # (1, *batch, *out_base) -> (*batch, *out_base), summed over seeded inputs.
-            blocks = [b.data.squeeze(0) for b in contribs.values()]  # data-ok eager embed boundary
-            data = blocks[0] if len(blocks) == 1 else torch.stack(blocks, 0).sum(0)
+        target = None
         if dynamic_batch is not None:
             batch = torch.broadcast_shapes(dynamic_batch, typed_out.dynamic_batch_shape)
             target = (*batch, *typed_out.sub_batch_shape, *typed_out.BASE_SHAPE)
-            data = data.broadcast_to(target).contiguous()
+        if not contribs:
+            # No seeded input reaches this output: zeros at the value output's
+            # (*batch, *out_sub_batch, *out_base), allocated once at the target.
+            if target is None:
+                data = torch.zeros_like(typed_out.data)  # data-ok eager embed boundary
+            else:
+                data = torch.zeros(target, dtype=typed_out.dtype, device=typed_out.device)
+        else:
+            # (1, *batch, *out_sub_batch, *out_base) -> (*batch, *out_sub_batch,
+            # *out_base), summed over seeded inputs.
+            blocks = [b.data.squeeze(0) for b in contribs.values()]  # data-ok eager embed boundary
+            data = blocks[0] if len(blocks) == 1 else torch.stack(blocks, 0).sum(0)
+            if target is not None:
+                data = data.broadcast_to(target).contiguous()
         out[name] = data
     return out
 
@@ -308,18 +315,25 @@ def assemble_jacobian(
     output_spec: dict[str, type[TensorWrapper]],
     input_names: list[str],
     input_spec: dict[str, type[TensorWrapper]],
+    call_batch: tuple[int, ...] | torch.Size | None = None,
 ) -> dict[str, dict[str, torch.Tensor]]:
     """Assemble per-(out, in) chain-rule blocks into the nested variable-pair Jacobian.
 
     Outbound Jacobian half of the eager embed boundary. ``v_out`` is the native
     ``ComposedModel`` chain-rule result from a leading-K identity seed per input
     (``{out_name: {in_name: block}}``). Returns the nested
-    ``{out_name: {in_name: (*batch, *out_base, *in_base)}}`` matching the C++
-    ``neml2::aoti::Model::jacobian`` contract (rows in ``output_spec`` order, cols
-    in ``input_spec`` order). A constant ``(out, in)`` pair (absent from
-    ``v_out``) is an explicit zero block at
-    ``(*batch, *out_sub_batch, *out_base, *in_base)``, with the plain batch and
-    the sub-batch both taken from that row's own output.
+    ``{out_name: {in_name: (*batch, *out_sub_batch, *out_base, *in_base)}}``
+    matching the C++ ``neml2::aoti::Model::jacobian`` contract (rows in
+    ``output_spec`` order, cols in ``input_spec`` order). A constant ``(out, in)``
+    pair (absent from ``v_out``) is an explicit zero block of the same shape.
+
+    *call_batch* is the batch the identity seeds were built at. Every chain-rule
+    block of a row carries it broadcast with that output's own batch, so a zero
+    block is sized the same way; an output that no batched parameter or input
+    reaches can have a smaller batch than *call_batch*. Without *call_batch* the
+    output's own batch is used. :func:`assemble_jvp_outputs` needs no such
+    argument: its tangents are seeded at the inputs' common batch, which every
+    output already carries.
 
     Reuses :func:`neml2.cli.aoti_export._leading_k_block_to_per_pair` (the AOTI
     export's own block-to-pair converter, lazily imported to avoid import-time
@@ -334,6 +348,8 @@ def assemble_jacobian(
         # take the plain batch and the sub-batch separately. Both are per row: a
         # batched parameter can give one output a larger plain batch than another.
         o_batch = tuple(typed_out.dynamic_batch_shape)
+        if call_batch is not None:
+            o_batch = tuple(torch.broadcast_shapes(call_batch, o_batch))
         o_sub = tuple(typed_out.sub_batch_shape)
         opts = {"dtype": typed_out.dtype, "device": typed_out.device}
         row: dict[str, torch.Tensor] = {}
@@ -344,7 +360,7 @@ def assemble_jacobian(
                 # Constant (out, in) pair: a structural zero block.
                 row[i_name] = torch.zeros(*o_batch, *o_sub, *o_base, *i_base, **opts)
             else:
-                # (*batch, *out_base, *in_base).
+                # (*batch, *out_sub_batch, *out_base, *in_base).
                 row[i_name] = _leading_k_block_to_per_pair(block, input_spec[i_name]).contiguous()
         jac[o_name] = row
     return jac
