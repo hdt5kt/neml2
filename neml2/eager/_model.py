@@ -184,7 +184,7 @@ class _EagerModel:
                 raise RuntimeError(
                     f"EagerModel: could not work out the output sub-batch shapes for the "
                     f"[Settings]/example_batch_shape declaration of model {model_name!r} in "
-                    f"{input_file!r} (the compile plan failed: {type(err).__name__}: {err})."
+                    f"'{input_file}' (the compile plan failed: {type(err).__name__}: {err})."
                 ) from err
         self.output_sub_batch_shapes: list[list[int]] = [
             list(planned.get(n, [])) for n in self.output_names
@@ -246,7 +246,7 @@ class _EagerModel:
         if t.ndim < bn or trailing != base:
             raise ValueError(
                 f"EagerModel {kind} {name!r}: non-canonical shape {tuple(t.shape)}; "
-                f"expected trailing base shape {base} (canonical shape is (*B, *base))."
+                f"expected trailing base shape {base} (canonical shape is (*B, *sub_batch, *base))."
             )
 
     def _sub_batch_ndim(self, name: str, t: torch.Tensor, batch_ndim: int | None) -> int:
@@ -456,7 +456,7 @@ class _EagerModel:
 
         ``inputs`` is split as in :meth:`forward`. Returns ``(outputs, J)`` --
         ``outputs`` keyed by ``output_names`` and ``J`` the nested
-        ``{out_name: {in_name: (*batch, *out_sub_batch, *out_base, *in_base)}}``
+        ``{out_name: {in_name: (*B, *out_sub_batch, *out_base, *in_base)}}``
         block dict (rows in ``output_spec`` order, cols in ``input_spec`` order),
         matching the C++ ``neml2::aoti::Model::jacobian`` contract. Columns are
         the plain-batch inputs only: a sub-batched input is held fixed and has no
@@ -499,6 +499,7 @@ class _EagerModel:
             self.output_spec,
             plain,
             self.input_spec,
+            call_batch,
         )
         return outputs, jac
 
@@ -579,7 +580,7 @@ class _EagerModel:
         swap's backward, exactly as in :meth:`param_jacobian`.
 
         *cotangents* maps each output name to ``w_o`` at the output's
-        ``(*batch, *out_base)`` shape (raw tensor). A call whose inputs or outputs
+        ``(*B, *out_base)`` shape (raw tensor). A call whose inputs or outputs
         carry sub-batch axes raises ``NotImplementedError``.
         """
         from ..models.param_ad import param_vjp as _param_vjp

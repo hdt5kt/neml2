@@ -482,6 +482,50 @@ def test_param_jacobian_batched_parameter():
         assert tuple(g["model.nu"].shape) == (), label
 
 
+def test_jacobian_zero_blocks_carry_call_batch(tmp_path):
+    """A batched parameter that reaches only one output still sets the call
+    batch of every Jacobian row: the identity seeds are built at that batch, so
+    the chain-rule blocks of an output the parameter does not reach carry it
+    too, and that row's structural zero blocks must match them."""
+    path = tmp_path / "model.i"
+    path.write_text(
+        """[Models]
+  [elastic]
+    type = LinearIsotropicElasticity
+    coefficients = '100 0.3'
+    coefficient_types = 'YOUNGS_MODULUS POISSONS_RATIO'
+  []
+  [lc]
+    type = ScalarLinearCombination
+    from = 'a b'
+    to = 'c'
+  []
+  [model]
+    type = ComposedModel
+    models = 'elastic lc'
+  []
+[]
+"""
+    )
+    B = 4
+    m = _EagerModel(str(path), "model")
+    m.set_parameter("elastic.E", torch.linspace(90.0, 110.0, B, dtype=m.dtype))
+    ins = {
+        "strain": torch.randn(6, dtype=m.dtype),
+        "a": torch.rand((), dtype=m.dtype),
+        "b": torch.rand((), dtype=m.dtype),
+    }
+    _, J = m.jacobian(ins)
+    # Row c: real blocks d(c)/d(a), d(c)/d(b) and the structural zero d(c)/d(strain).
+    assert tuple(J["c"]["a"].shape) == (B,)
+    assert tuple(J["c"]["b"].shape) == (B,)
+    assert tuple(J["c"]["strain"].shape) == (B, 6)
+    assert not J["c"]["strain"].any()
+    # Row stress: the real block and the zero blocks share the batch.
+    assert tuple(J["stress"]["strain"].shape) == (B, 6, 6)
+    assert tuple(J["stress"]["a"].shape) == (B, 6)
+
+
 # --- py-eager native Model param methods (the route-method surface) -----------
 # ``neml2.load_model(...)`` returns a native ``Model``; these pin its
 # ``param_jacobian`` / ``param_vjp`` methods -- the py-eager half of the

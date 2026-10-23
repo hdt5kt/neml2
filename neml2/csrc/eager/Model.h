@@ -102,7 +102,10 @@ public:
   /// (the original `.i`, not a compiled stub) by constructing it in an embedded
   /// Python interpreter. Throws @ref neml2::aoti::FatalError if the interpreter
   /// cannot start, the `neml2` package is not importable, the file cannot be
-  /// parsed, or `model_name` is not found.
+  /// parsed, `model_name` is not found, or the file's
+  /// `[Settings]/example_batch_shape` names an unknown variable or its output
+  /// sub-batch shapes cannot be worked out (the compile plan run at load fails,
+  /// even if the model itself would evaluate).
   ///
   /// `device_override`, when set, moves the model onto that device (e.g.
   /// `cuda:1`); when omitted, the model's natural device is used.
@@ -177,8 +180,8 @@ public:
   /// Acquires the GIL.
   std::map<std::string, at::Tensor> forward(const std::map<std::string, at::Tensor> & inputs) const;
 
-  /// Evaluate + JVP. `tangents` shares its keys + `(*B, *in_base)` shapes with
-  /// `inputs`; a missing key defaults to a zero tangent. Returns
+  /// Evaluate + JVP. `tangents` is keyed like `inputs`, each at `(*B, *in_base)`;
+  /// a missing key defaults to a zero tangent. Returns
   /// `{outputs, jvp_outputs}` -- both maps keyed by `output_names()`;
   /// `jvp_outputs[name]` is the directional derivative at the output's natural
   /// `(*B, *out_sub_batch_shape, *out_base_shape)`. A tangent for a sub-batched
