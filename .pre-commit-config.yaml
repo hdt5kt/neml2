@@ -8,7 +8,7 @@ repos:
         pass_filenames: true
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # dependencies: ruff.version
-    rev: v0.16.8
+    rev: v0.17.2
     hooks:
       - id: ruff
         args: [--fix]
@@ -37,7 +37,7 @@ repos:
         entry: doc/scripts/check_notebook_executed.py
         language: script
         files: >-
-          ^doc/content/(tutorials/optimization/(deterministic|statistical|crystal_plasticity_calibration|taylor_polycrystal)/main|modules/kwn/(precipitation_316h|al_cu_ttp)|modules/solid_mechanics/crystal_plasticity/(formulations|polefigures|slip_anisotropy))\.ipynb$
+          ^doc/content/(tutorials/optimization/(deterministic|statistical|crystal_plasticity_calibration|taylor_polycrystal)/main|modules/kwn/(precipitation_316h|al_cu_ttp)|modules/pbm/grinding|modules/solid_mechanics/crystal_plasticity/(formulations|polefigures|slip_anisotropy))\.ipynb$
         pass_filenames: true
       - id: nmhit-format
         name: nmhit-format
