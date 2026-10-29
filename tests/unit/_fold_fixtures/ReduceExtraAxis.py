@@ -42,8 +42,8 @@ from neml2.schema import HitSchema, input, output
 from neml2.types import Scalar, sum
 
 
-@register_neml2_object("SumExtra")
-class SumExtra(Model):
+@register_neml2_object("ReduceExtraAxis")
+class ReduceExtraAxis(Model):
     r"""Sum a per-(common, extra) field over its extra axis (test fixture)."""
 
     hit = HitSchema(

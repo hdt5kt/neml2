@@ -22,7 +22,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-r"""SR2-valued counterpart of :mod:`SumExtra` for the non-scalar column fold.
+r"""SR2-valued counterpart of :mod:`ReduceExtraAxis` for the non-scalar column fold.
 
 ``y_g = sum_i e_{g,i}`` with ``e`` an SR2 (base 6) field on sub-batch ``(common, extra)``.
 It makes a DENSE, per-common residual reduce a BLOCK ``(common, extra)`` unknown whose
@@ -41,8 +41,8 @@ from neml2.schema import HitSchema, input, output
 from neml2.types import SR2, sum
 
 
-@register_neml2_object("SumExtraSR2")
-class SumExtraSR2(Model):
+@register_neml2_object("ReduceExtraAxisSR2")
+class ReduceExtraAxisSR2(Model):
     r"""Sum an SR2 per-(common, extra) field over its extra axis (test fixture)."""
 
     hit = HitSchema(

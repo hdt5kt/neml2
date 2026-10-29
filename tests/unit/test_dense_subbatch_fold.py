@@ -689,7 +689,7 @@ def _dense_reduces_block_extra_model():
             weights = '1 -1'
           []
           [sumex]
-            type = SumExtra
+            type = ReduceExtraAxis
             e = 'u_extra'
             y = 'u_extra_sum'
           []
@@ -769,7 +769,7 @@ def _dense_reduces_block_extra_sr2_model():
             weights = '1 -1'
           []
           [sumex]
-            type = SumExtraSR2
+            type = ReduceExtraAxisSR2
             e = 'u_extra'
             y = 'u_extra_sum'
           []
