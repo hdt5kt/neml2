@@ -198,8 +198,10 @@ public:
   ///
   /// `derivatives` takes `neml2-compile -d` specs; empty selects every output
   /// against the plain-batch inputs. A sub-batched input is included only when
-  /// named, laid out as in @ref neml2::aoti::Model::derivative_forms. Acquires
-  /// the GIL.
+  /// named; its block is `(*B, *sub_batch, *out_base, *in_base)` when site-local,
+  /// else `(*B, *out_sub_batch, *out_base, *in_sub_batch, *in_base)` (the
+  /// "paired" / "full" forms of @ref neml2::aoti::Model::derivative_forms).
+  /// Acquires the GIL.
   std::pair<std::map<std::string, at::Tensor>, neml2::aoti::VariablePairJacobian>
   jacobian(const std::map<std::string, at::Tensor> & inputs,
            const std::vector<std::string> & derivatives = {}) const;

@@ -1700,6 +1700,7 @@ def _compile_forward_segment(
         n_outs = len(jvp_module.output_names)
         probe_outputs = tuple(probe[:n_outs])
         probe_pairs = list(probe[n_outs:])
+        probe_forms = list(jvp_module.pair_forms)
         jvp_pkg_name = f"{pkg_basename}_jvp.pt2"
         if uses_ad:
             _compile_param_derivative_graph(
@@ -1736,7 +1737,7 @@ def _compile_forward_segment(
                 in_sub = traced_in_sub.get(in_name, ())
                 in_base_ndim = len(in_type.BASE_SHAPE)
                 pair_t = probe_pairs[k]
-                form = jvp_module.pair_forms[k]
+                form = probe_forms[k]
                 # The leading dyn axes are size-1 iff the block is batch-independent.
                 trailing = len(in_sub) + out_base_ndim + in_base_ndim
                 if form == "full":

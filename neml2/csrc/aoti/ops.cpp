@@ -30,6 +30,8 @@
 
 #include "neml2/csrc/aoti/internal.h"
 
+#include <algorithm>
+
 // at::infer_size (broadcast two shapes) for the common-batch computation.
 #include <ATen/ExpandUtils.h>
 
@@ -324,11 +326,16 @@ Model::Impl::_public_pair_block(const at::Tensor & band,
                                 const std::string & in_name) const
 {
   // band: (*dyn, out_sub*out_base, in_sub*in_base), sites outer, base inner.
-  std::size_t oi = 0, ii = 0;
-  while (_output_names[oi] != out_name)
-    ++oi;
-  while (_input_names[ii] != in_name)
-    ++ii;
+  const auto oit = std::find(_output_names.begin(), _output_names.end(), out_name);
+  const auto iit = std::find(_input_names.begin(), _input_names.end(), in_name);
+  _assert(oit != _output_names.end() && iit != _input_names.end(),
+          "aoti::Model: unknown derivative pair '",
+          out_name,
+          ":",
+          in_name,
+          "'.");
+  const auto oi = static_cast<std::size_t>(oit - _output_names.begin());
+  const auto ii = static_cast<std::size_t>(iit - _input_names.begin());
   const auto & out_sub = _output_sub_batch_shapes[oi];
   const auto & out_base = _output_base_shapes[oi];
   const auto & in_sub = _input_sub_batch_shapes[ii];
