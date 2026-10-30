@@ -38,6 +38,7 @@ from ...factory import register_neml2_object
 from ...schema import HitSchema, dependency, option
 from ...solvers import ConvergenceError, DenseLU, Newton, RetCode
 from ...types import Tensor, TensorWrapper
+from ...types.functions import fullify
 from .._hit import _opt_list_str
 from ..chain_rule import ChainRuleDict
 from ..model import Model, register_submodule
@@ -234,6 +235,10 @@ def _matrix_pushforward(
     :class:`Tensor` matmul, then unflatten back to the output wrapper's
     typed shape.
     """
+    # A per-site (paired) tangent stores all sites in one direction; the DENSE
+    # block couples sites, so enumerate them before folding into the DOF axis.
+    if any(p is not None for p in tangent.k_pairing):
+        tangent = fullify(tangent).materialize()
     # Flatten the tangent's (*sub_batch, *BASE) trailing axes into a
     # single DOF axis, wrap as a Tensor whose batch_ndim covers the
     # leading (K, *dynamic_batch) axes. ``tangent.dynamic_batch_shape``
